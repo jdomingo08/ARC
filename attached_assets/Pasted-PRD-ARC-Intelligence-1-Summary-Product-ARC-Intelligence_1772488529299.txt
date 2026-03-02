@@ -1,0 +1,599 @@
+PRD: ARC Intelligence
+1) Summary
+
+Product: ARC Intelligence
+One-liner: Internal app to intake AI tool requests, route approvals, maintain an authoritative AI platform inventory, and monitor vendor risk signals.
+Primary users: Any employee requesting a tool, and the AI governance committee (chairs + leads).
+Primary outcomes:
+
+Standardize AI tool intake and approvals.
+
+Track approved tools, owners, costs, and risk posture.
+
+Catch vendor breach/news signals tied to approved and in-review tools.
+
+2) Problem and context
+
+Teams adopt AI tools fast. Today that creates:
+
+No consistent intake process or record of decision rationale.
+
+Unclear security/technical/cost sign-offs.
+
+No single list of what’s approved, in review, or rejected.
+
+No structured monitoring for vendor breaches/news once tools are in use.
+
+3) Goals and non-goals
+Goals
+
+Intake form captures consistent info for AI tool evaluation.
+
+Approval workflow runs automatically on submission with clear decision logic and audit trail.
+
+Platform list acts as system-of-record for all AI platforms (in review, approved, rejected, retired).
+
+Extensible metadata lets admins add new platform attributes and tiers without a code change.
+
+Risk monitoring agent tracks breaches/news for platforms and logs findings with risk classification.
+
+Non-goals (for MVP)
+
+Procurement payment processing.
+
+Contract lifecycle management (CLM) authoring.
+
+Full vendor security questionnaire automation (can be added later).
+
+SIEM/SOAR automation (integrate later if needed).
+
+4) Success metrics
+
+Cycle time: median time from submission to final decision.
+
+Throughput: number of requests processed per month.
+
+Compliance: % of tools used that exist in the platform list.
+
+Quality: % of submissions returned for missing info.
+
+Risk coverage: % of approved/in-review platforms with active monitoring and weekly review cadence.
+
+Auditability: 100% of decisions have recorded rationale + approver identity + timestamp.
+
+5) Personas and roles
+Requester (Employee)
+
+Submits a tool request with justification and usage details.
+
+Checks status and receives updates.
+
+Committee roles
+
+Jeff DeMartino (Chair): final sign-off, executive alignment.
+
+Kirun Amiri (Co-Chair): IT governance, scalability, policy oversight.
+
+LeaAnna Hernandez (AI Strategy Lead): strategic fit and workflow impact.
+
+Josh Silva (Cyber Security Lead): privacy, security posture, compliance.
+
+Jorge Domingo (Tech & Financial Lead): compatibility, API needs, cost/ROI.
+
+Admin
+
+Manages attributes, tiers, templates, approver routing, and integrations.
+
+6) Scope and releases
+MVP (Release 1)
+
+Intake form with 4 sections (as provided).
+
+Submission creates:
+
+a Request record
+
+a Platform record in the platform list (status = “On Review”)
+
+Approval workflow with required “Pass” from:
+
+Security (Josh)
+
+Technical/Financial (Jorge)
+
+Final sign-off by Chairs (Jeff + Kirun, rules below)
+
+Platform list with default attributes + ability to add attributes and tiers (admin-only).
+
+Basic notifications (email/Teams/Slack, pick one channel first).
+
+Audit log for every change/decision.
+
+Release 2
+
+SLA timers, escalations, reminders, delegation.
+
+Evidence attachments and structured review checklists.
+
+Integration hooks (webhooks/API) for provisioning or license workflows.
+
+Release 3
+
+Risk monitoring agent module + dashboards + scheduled runs.
+
+Optional SIEM ticketing integration (Jira/ServiceNow).
+
+7) Functional requirements
+Module A: Intake Form
+
+A1. Form sections and fields
+
+Section 1: The Basics
+
+Requester Name
+
+Department
+
+Tool Name (free text + optional autocomplete from platform list)
+
+Primary Goal (free text)
+
+Estimated Number of Users (Individual / Team / Department-wide + optional numeric estimate)
+
+Section 2: Strategic Fit & Use Case
+
+Workflow Integration (free text)
+
+Alternatives (Yes/No + text: which tools checked)
+
+Impact Level (High saves 10+ hours/week / Medium / Low)
+
+Section 3: Technical & Financial
+
+Platform Compatibility (checkboxes: Outlook, CRM, Internal DBs, Other + notes)
+
+Cost Structure (Monthly subscription / Per-seat / One-time / Other)
+
+Total Estimated Annual Cost (currency + amount)
+
+Section 4: Security & Data Privacy
+
+Data Input (Public / Client Data / PII / Internal Financials / Other + notes)
+
+Data Training (Yes / No / Unsure)
+
+Login Method (SSO / Email+Password / Other)
+
+A2. Validation
+
+Required fields: Requester, Department, Tool Name, Primary Goal, Impact Level, Data Input, Login Method.
+
+Cost required if Cost Structure selected.
+
+Annual cost must be numeric and non-negative.
+
+A3. Submission behavior
+
+On submit:
+
+Create a Request record.
+
+Create or update a Platform record keyed by Tool Name (rules below).
+
+Trigger approval workflow (Module B).
+
+Acceptance criteria
+
+Given required fields filled, when user submits, then the request is created, platform entry is created/linked, and workflow starts in “Pending Reviews”.
+
+Module B: Approval Workflow (Parallel to form submission)
+
+B1. Workflow trigger
+
+Trigger on successful form submission.
+
+B2. Stages
+
+Strategic review (LeaAnna) – optional gate for MVP or “advisory” (your call).
+
+Security review (Josh) – required.
+
+Technical/Financial review (Jorge) – required.
+
+Chair sign-off (Jeff + Kirun) – required final.
+
+B3. Decision logic
+
+A request can reach final sign-off only if:
+
+Security = Pass
+
+Tech/Financial = Pass
+
+Chair sign-off rules (pick one for MVP, configurable later):
+
+Option 1 (strict): both Chairs must approve (Jeff AND Kirun).
+
+Option 2 (practical): either Chair can approve; the other is notified and can override within X days.
+
+Outcomes:
+
+Approved
+
+Rejected
+
+Needs More Info (returns to requester, pauses workflow)
+
+B4. Review inputs
+Each reviewer records:
+
+Decision (Pass / Fail / Needs More Info)
+
+Rationale (required)
+
+Risk notes (optional)
+
+Conditions (optional: “Approved if SSO enabled”, “Only public data”, etc.)
+
+B5. Notifications
+
+On submission: requester gets confirmation + tracking ID.
+
+On each decision: requester gets status update.
+
+On “Needs More Info”: requester gets a task list and a link to edit/resubmit.
+
+On final: requester + committee get outcome summary.
+
+B6. Audit trail
+
+Log every decision, comment, status change, and field edit with:
+
+who, when, what changed, before/after values.
+
+Acceptance criteria
+
+If Security = Fail, then request status becomes “Rejected” and cannot be approved by Chairs.
+
+If Security = Pass and Tech/Financial = Pass, then Chairs can approve.
+
+If Chairs approve, then Platform status updates to “Approved”.
+
+If any reviewer selects “Needs More Info”, request status becomes “Waiting on Requester” and workflow pauses.
+
+Module C: Platform List (System of record)
+
+C1. Core behavior
+
+Every intake submission creates a platform item (or links to an existing one) and sets:
+
+Platform Status = On Review
+
+Link to the originating Request(s)
+
+C2. Default attributes (initial schema)
+
+Tool Name
+
+Status (On Review / Approved / Rejected / Retired)
+
+Department requesting
+
+Primary Goal
+
+Estimated users (category + optional numeric)
+
+Workflow integration notes
+
+Alternatives considered
+
+Impact level
+
+Compatibility needs (Outlook/CRM/Internal DBs/Other)
+
+Cost structure
+
+Annual cost
+
+Data input category
+
+Data training (Yes/No/Unsure)
+
+Login method
+
+Decision summary (final)
+
+Approval date
+
+Approvers (Security, Tech/Financial, Chairs)
+
+C3. Extensible attributes
+
+Admin can add new attributes without code changes:
+
+Attribute name
+
+Data type (text, number, dropdown, multi-select, date, boolean)
+
+Required? (yes/no)
+
+Default value
+
+Applies to which statuses (optional)
+
+Attributes render automatically on:
+
+Platform detail page
+
+Platform create/edit form (admin)
+
+C4. Tiers
+
+Admin defines tiers (example: Tier 0 Experimental, Tier 1 Approved, Tier 2 Enterprise Standard).
+
+Tier rules:
+
+Tier label
+
+Description
+
+Allowed data types (optional: e.g., PII allowed only Tier 2)
+
+Required controls (optional: SSO required, contract required)
+
+Platform can be assigned one tier (or multiple if you prefer, but start with one).
+
+C5. Status transitions
+
+On new request: On Review
+
+On approval: Approved
+
+On rejection: Rejected (keep record + rationale)
+
+On retirement: Retired (no new requests allowed, or warnings on intake)
+
+Acceptance criteria
+
+When a request for “Gamma” is submitted, a platform entry for “Gamma” exists and links back to the request.
+
+When the request is approved, the platform status updates to Approved and stores the decision summary.
+
+Module D: Risk Monitoring Agent
+
+D1. Purpose
+Monitor daily news and breach disclosures about platforms in the platform list.
+
+D2. Capabilities
+
+Admin/committee can prompt the agent manually:
+
+“Check for breaches/news for Tool X”
+
+“Run today’s sweep for all Approved tools”
+
+Scheduled runs:
+
+Daily sweep for Approved + On Review.
+
+Outputs per platform:
+
+Findings summary
+
+Source links (stored as references)
+
+Risk classification (Low/Medium/High/Critical)
+
+Recommended actions (e.g., “pause rollout”, “review TOS”, “notify security”)
+
+Confidence level (Low/Med/High)
+
+D3. Work log
+
+Every run produces a log entry:
+
+run ID, timestamp, scope (Tool X vs all), prompt used, platforms checked
+
+results count + risk ratings
+
+who initiated (system vs user)
+
+Each finding links to the platform record.
+
+D4. Triage workflow (simple MVP)
+
+If risk = High/Critical:
+
+Create a “Risk Review” task for Josh + Chairs.
+
+Notify owners of the platform.
+
+Acceptance criteria
+
+Daily job runs and appends logs.
+
+Manual prompt runs on demand and stores output tied to the platform.
+
+High/Critical triggers notifications and a task.
+
+8) Permissions and RBAC
+Roles
+
+Requester: create request, view own requests, respond to “Needs More Info”.
+
+Reviewer (LeaAnna/Josh/Jorge): view assigned requests, decide, comment, request more info.
+
+Chair: final approve/reject, override, view all.
+
+Admin: manage tiers, attributes, users, integrations, and system settings.
+
+Data access rules
+
+Requesters only see their own submissions (unless you want department visibility).
+
+Committee sees all.
+
+Audit logs are read-only to all committee/admin.
+
+9) Data model (conceptual)
+Entities
+
+User (id, name, email, department, roles)
+
+Request
+
+id, requester_id, department, tool_name, fields (structured), status, created_at, updated_at
+
+ReviewDecision
+
+id, request_id, reviewer_role, reviewer_id, decision, rationale, conditions, created_at
+
+Platform
+
+id, tool_name (unique key), status, tier_id, attributes (structured + dynamic), owner, last_reviewed_at
+
+PlatformAttributeDefinition
+
+id, name, type, options, required, default, scope rules
+
+Tier
+
+id, name, description, rules (json)
+
+RiskFinding
+
+id, platform_id, classification, summary, sources, recommended_actions, created_at
+
+AgentRunLog
+
+id, initiated_by, scope, prompt, platforms_checked, results_summary, created_at
+
+AuditLog
+
+id, entity_type, entity_id, action, before, after, actor_id, timestamp
+
+10) Key workflows (end-to-end)
+Flow 1: New request → approvals → platform approved
+
+Requester submits intake.
+
+System creates Request + Platform (On Review).
+
+System assigns reviewers (Josh, Jorge, optional LeaAnna).
+
+Reviews collected.
+
+If Josh=Pass AND Jorge=Pass → Chairs sign-off.
+
+Approved → Platform status becomes Approved, tier set (optional), decision summary stored.
+
+Notifications sent.
+
+Flow 2: Needs More Info loop
+
+Reviewer selects “Needs More Info” with questions.
+
+Requester edits the request and resubmits.
+
+Prior decisions remain in history but marked “superseded” (or keep as-is and add new decisions).
+
+Flow 3: Risk monitoring
+
+Daily agent runs across Approved + On Review.
+
+Logs findings.
+
+High/Critical triggers a Risk Review task and alerts.
+
+11) Non-functional requirements
+
+Security: RBAC, SSO preferred, least privilege. Encrypt data at rest + in transit.
+
+Auditability: immutable audit logs for decisions and key edits.
+
+Availability: target 99.5%+ for internal app (adjust based on hosting).
+
+Performance: form submit < 2 seconds; list pages < 3 seconds for typical loads.
+
+Data retention: keep requests and decisions for X years (set by policy).
+
+Observability: centralized logs + basic metrics (requests per week, approval time, failures).
+
+12) Architecture (recommended)
+High-level components
+
+Web app (frontend): intake form, request tracker, reviewer console, platform list, agent console.
+
+API backend: auth, business logic, validation, workflow orchestration, RBAC.
+
+Database: relational (Postgres) for core entities + JSON fields for extensible attributes.
+
+Queue/worker: async workflow tasks, notifications, agent runs.
+
+Notification service: email or Teams/Slack webhook integration.
+
+Agent service: scheduled + on-demand runs, writes RiskFindings + AgentRunLog.
+
+Why JSON for dynamic attributes
+
+Attribute definitions live in tables.
+
+Platform stores dynamic attribute values in a JSON column keyed by attribute ID/name.
+
+You still keep core fields normalized for reporting (status, tier, tool_name, costs).
+
+13) Open decisions (pick defaults now)
+
+If you don’t want to slow down, start with these defaults:
+
+Chair approval: both Chairs required for MVP (tight governance).
+
+LeaAnna review: advisory (doesn’t block), but required comment on high-impact requests.
+
+Platform uniqueness: tool_name normalized (case-insensitive) + optional vendor URL later.
+
+Status labels: On Review, Approved, Rejected, Retired.
+
+14) MVP screen list
+
+New Intake Request
+
+My Requests
+
+Request Detail (status, timeline, edits)
+
+Reviewer Inbox (assigned requests)
+
+Review Panel (decision + rationale)
+
+Platform List (filters by status/tier/department/risk)
+
+Platform Detail (attributes + linked requests + risk findings)
+
+Admin
+
+Attribute definitions
+
+Tier management
+
+User roles
+
+Risk Agent Console
+
+Run now (tool or all)
+
+View logs + findings
+
+15) MVP acceptance checklist (quick)
+
+Intake submission creates Request + Platform(On Review).
+
+Workflow assigns Josh and Jorge automatically.
+
+Both must Pass before Chairs can Approve.
+
+Final decision updates Platform status and captures approver details.
+
+Admin can add a new attribute and see it appear on Platform detail and edit.
+
+Daily agent run produces logs and findings tied to platforms.
