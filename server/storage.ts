@@ -1,38 +1,430 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import { eq, desc, and, ilike } from "drizzle-orm";
+import {
+  users, requests, reviewDecisions, platforms,
+  platformAttributeDefinitions, tiers, riskFindings,
+  agentRunLogs, auditLogs,
+  type User, type InsertUser,
+  type Request, type InsertRequest,
+  type ReviewDecision, type InsertReviewDecision,
+  type Platform, type InsertPlatform,
+  type PlatformAttributeDefinition, type InsertAttributeDefinition,
+  type Tier, type InsertTier,
+  type RiskFinding, type InsertRiskFinding,
+  type AgentRunLog, type InsertAgentRunLog,
+  type AuditLog, type InsertAuditLog,
+} from "@shared/schema";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  getAllUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserRole(id: string, role: string, reviewerRole?: string): Promise<User | undefined>;
+
+  createRequest(request: InsertRequest): Promise<Request>;
+  getRequest(id: string): Promise<Request | undefined>;
+  getRequestsByRequester(requesterId: string): Promise<Request[]>;
+  getAllRequests(): Promise<Request[]>;
+  updateRequestStatus(id: string, status: string): Promise<Request | undefined>;
+  updateRequest(id: string, data: Partial<Request>): Promise<Request | undefined>;
+
+  createReviewDecision(decision: InsertReviewDecision): Promise<ReviewDecision>;
+  getReviewDecisionsByRequest(requestId: string): Promise<ReviewDecision[]>;
+  supersedePriorDecisions(requestId: string, reviewerRole: string): Promise<void>;
+
+  createPlatform(platform: InsertPlatform): Promise<Platform>;
+  getPlatform(id: string): Promise<Platform | undefined>;
+  getPlatformByToolName(toolName: string): Promise<Platform | undefined>;
+  getAllPlatforms(): Promise<Platform[]>;
+  updatePlatform(id: string, data: Partial<Platform>): Promise<Platform | undefined>;
+
+  createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition>;
+  getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]>;
+
+  createTier(tier: InsertTier): Promise<Tier>;
+  getAllTiers(): Promise<Tier[]>;
+  getTier(id: string): Promise<Tier | undefined>;
+
+  createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding>;
+  getRiskFindingsByPlatform(platformId: string): Promise<RiskFinding[]>;
+  getAllRiskFindings(): Promise<RiskFinding[]>;
+
+  createAgentRunLog(log: InsertAgentRunLog): Promise<AgentRunLog>;
+  getAllAgentRunLogs(): Promise<AgentRunLog[]>;
+
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
+
+  seedData(): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(users.name);
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [created] = await db.insert(users).values(user).returning();
+    return created;
+  }
+
+  async updateUserRole(id: string, role: string, reviewerRole?: string): Promise<User | undefined> {
+    const [updated] = await db.update(users).set({ role, reviewerRole: reviewerRole || null }).where(eq(users.id, id)).returning();
+    return updated;
+  }
+
+  async createRequest(request: InsertRequest): Promise<Request> {
+    const trackingId = `ARC-${Date.now().toString(36).toUpperCase()}`;
+    const [created] = await db.insert(requests).values({ ...request, trackingId, status: "pending_reviews" }).returning();
+    return created;
+  }
+
+  async getRequest(id: string): Promise<Request | undefined> {
+    const [request] = await db.select().from(requests).where(eq(requests.id, id));
+    return request;
+  }
+
+  async getRequestsByRequester(requesterId: string): Promise<Request[]> {
+    return db.select().from(requests).where(eq(requests.requesterId, requesterId)).orderBy(desc(requests.createdAt));
+  }
+
+  async getAllRequests(): Promise<Request[]> {
+    return db.select().from(requests).orderBy(desc(requests.createdAt));
+  }
+
+  async updateRequestStatus(id: string, status: string): Promise<Request | undefined> {
+    const [updated] = await db.update(requests).set({ status, updatedAt: new Date() }).where(eq(requests.id, id)).returning();
+    return updated;
+  }
+
+  async updateRequest(id: string, data: Partial<Request>): Promise<Request | undefined> {
+    const [updated] = await db.update(requests).set({ ...data, updatedAt: new Date() }).where(eq(requests.id, id)).returning();
+    return updated;
+  }
+
+  async createReviewDecision(decision: InsertReviewDecision): Promise<ReviewDecision> {
+    const [created] = await db.insert(reviewDecisions).values(decision).returning();
+    return created;
+  }
+
+  async getReviewDecisionsByRequest(requestId: string): Promise<ReviewDecision[]> {
+    return db.select().from(reviewDecisions).where(eq(reviewDecisions.requestId, requestId)).orderBy(desc(reviewDecisions.createdAt));
+  }
+
+  async supersedePriorDecisions(requestId: string, reviewerRole: string): Promise<void> {
+    await db.update(reviewDecisions)
+      .set({ superseded: true })
+      .where(and(eq(reviewDecisions.requestId, requestId), eq(reviewDecisions.reviewerRole, reviewerRole)));
+  }
+
+  async createPlatform(platform: InsertPlatform): Promise<Platform> {
+    const [created] = await db.insert(platforms).values(platform).returning();
+    return created;
+  }
+
+  async getPlatform(id: string): Promise<Platform | undefined> {
+    const [platform] = await db.select().from(platforms).where(eq(platforms.id, id));
+    return platform;
+  }
+
+  async getPlatformByToolName(toolName: string): Promise<Platform | undefined> {
+    const [platform] = await db.select().from(platforms).where(ilike(platforms.toolName, toolName));
+    return platform;
+  }
+
+  async getAllPlatforms(): Promise<Platform[]> {
+    return db.select().from(platforms).orderBy(desc(platforms.createdAt));
+  }
+
+  async updatePlatform(id: string, data: Partial<Platform>): Promise<Platform | undefined> {
+    const [updated] = await db.update(platforms).set({ ...data, updatedAt: new Date() }).where(eq(platforms.id, id)).returning();
+    return updated;
+  }
+
+  async createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition> {
+    const [created] = await db.insert(platformAttributeDefinitions).values(attr).returning();
+    return created;
+  }
+
+  async getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]> {
+    return db.select().from(platformAttributeDefinitions).orderBy(platformAttributeDefinitions.name);
+  }
+
+  async createTier(tier: InsertTier): Promise<Tier> {
+    const [created] = await db.insert(tiers).values(tier).returning();
+    return created;
+  }
+
+  async getAllTiers(): Promise<Tier[]> {
+    return db.select().from(tiers).orderBy(tiers.name);
+  }
+
+  async getTier(id: string): Promise<Tier | undefined> {
+    const [tier] = await db.select().from(tiers).where(eq(tiers.id, id));
+    return tier;
+  }
+
+  async createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding> {
+    const [created] = await db.insert(riskFindings).values(finding).returning();
+    return created;
+  }
+
+  async getRiskFindingsByPlatform(platformId: string): Promise<RiskFinding[]> {
+    return db.select().from(riskFindings).where(eq(riskFindings.platformId, platformId)).orderBy(desc(riskFindings.createdAt));
+  }
+
+  async getAllRiskFindings(): Promise<RiskFinding[]> {
+    return db.select().from(riskFindings).orderBy(desc(riskFindings.createdAt));
+  }
+
+  async createAgentRunLog(log: InsertAgentRunLog): Promise<AgentRunLog> {
+    const [created] = await db.insert(agentRunLogs).values(log).returning();
+    return created;
+  }
+
+  async getAllAgentRunLogs(): Promise<AgentRunLog[]> {
+    return db.select().from(agentRunLogs).orderBy(desc(agentRunLogs.createdAt));
+  }
+
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [created] = await db.insert(auditLogs).values(log).returning();
+    return created;
+  }
+
+  async getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]> {
+    return db.select().from(auditLogs)
+      .where(and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)))
+      .orderBy(desc(auditLogs.timestamp));
+  }
+
+  async seedData(): Promise<void> {
+    const existingUsers = await db.select().from(users);
+    if (existingUsers.length > 0) return;
+
+    const seedUsers: InsertUser[] = [
+      { name: "Jeff DeMartino", email: "jeff@arc.io", department: "Executive", role: "chair", reviewerRole: "chair" },
+      { name: "Kirun Amiri", email: "kirun@arc.io", department: "IT Governance", role: "chair", reviewerRole: "chair" },
+      { name: "LeaAnna Hernandez", email: "leaanna@arc.io", department: "AI Strategy", role: "reviewer", reviewerRole: "strategic" },
+      { name: "Josh Silva", email: "josh@arc.io", department: "Cyber Security", role: "reviewer", reviewerRole: "security" },
+      { name: "Jorge Domingo", email: "jorge@arc.io", department: "Technology", role: "reviewer", reviewerRole: "technical_financial" },
+      { name: "Sarah Chen", email: "sarah@arc.io", department: "Marketing", role: "requester" },
+      { name: "Mike Thompson", email: "mike@arc.io", department: "Engineering", role: "requester" },
+      { name: "Admin User", email: "admin@arc.io", department: "IT", role: "admin" },
+    ];
+
+    const createdUsers: User[] = [];
+    for (const u of seedUsers) {
+      const [created] = await db.insert(users).values(u).returning();
+      createdUsers.push(created);
+    }
+
+    const [tier0] = await db.insert(tiers).values({
+      name: "Tier 0 - Experimental",
+      description: "Tools in trial phase with limited data access. No PII or client data allowed.",
+      allowedDataTypes: ["public"],
+      requiredControls: [],
+    }).returning();
+
+    const [tier1] = await db.insert(tiers).values({
+      name: "Tier 1 - Approved",
+      description: "Approved for general business use. Internal data allowed with SSO.",
+      allowedDataTypes: ["public", "internal"],
+      requiredControls: ["SSO"],
+    }).returning();
+
+    const [tier2] = await db.insert(tiers).values({
+      name: "Tier 2 - Enterprise Standard",
+      description: "Enterprise-grade tools with full data access. Contract and SSO required.",
+      allowedDataTypes: ["public", "internal", "pii", "client_data"],
+      requiredControls: ["SSO", "Contract", "DPA"],
+    }).returning();
+
+    const sarah = createdUsers.find(u => u.email === "sarah@arc.io")!;
+    const mike = createdUsers.find(u => u.email === "mike@arc.io")!;
+    const josh = createdUsers.find(u => u.email === "josh@arc.io")!;
+    const jorge = createdUsers.find(u => u.email === "jorge@arc.io")!;
+    const jeff = createdUsers.find(u => u.email === "jeff@arc.io")!;
+    const kirun = createdUsers.find(u => u.email === "kirun@arc.io")!;
+
+    const [platform1] = await db.insert(platforms).values({
+      toolName: "ChatGPT Enterprise",
+      status: "approved",
+      tierId: tier2.id,
+      department: "Engineering",
+      primaryGoal: "Code generation, documentation, and analysis assistance",
+      estimatedUsers: "department",
+      impactLevel: "high",
+      costStructure: "per_seat",
+      annualCost: "48000.00",
+      dataInput: ["internal_financials", "public"],
+      dataTraining: "no",
+      loginMethod: "SSO",
+      decisionSummary: "Approved for enterprise use with SSO. Training disabled. Contract signed.",
+      approvalDate: new Date("2025-11-15"),
+      ownerId: mike.id,
+      lastReviewedAt: new Date("2025-11-15"),
+    }).returning();
+
+    const [platform2] = await db.insert(platforms).values({
+      toolName: "Jasper AI",
+      status: "on_review",
+      department: "Marketing",
+      primaryGoal: "Marketing content creation and brand voice consistency",
+      estimatedUsers: "team",
+      impactLevel: "medium",
+      costStructure: "monthly_subscription",
+      annualCost: "12000.00",
+      dataInput: ["public"],
+      dataTraining: "unsure",
+      loginMethod: "email_password",
+      ownerId: sarah.id,
+    }).returning();
+
+    const [platform3] = await db.insert(platforms).values({
+      toolName: "Copilot for M365",
+      status: "approved",
+      tierId: tier1.id,
+      department: "IT",
+      primaryGoal: "Productivity across Office suite - document drafting, email summaries",
+      estimatedUsers: "department",
+      impactLevel: "high",
+      costStructure: "per_seat",
+      annualCost: "72000.00",
+      dataInput: ["internal_financials", "client_data"],
+      dataTraining: "no",
+      loginMethod: "SSO",
+      decisionSummary: "Approved with M365 integration. Data stays within tenant.",
+      approvalDate: new Date("2025-10-01"),
+      ownerId: kirun.id,
+      lastReviewedAt: new Date("2025-10-01"),
+    }).returning();
+
+    await db.insert(platforms).values({
+      toolName: "DeepSeek Coder",
+      status: "rejected",
+      department: "Engineering",
+      primaryGoal: "Open-source code completion",
+      estimatedUsers: "individual",
+      impactLevel: "low",
+      costStructure: "",
+      annualCost: "0",
+      dataInput: ["public"],
+      dataTraining: "yes",
+      loginMethod: "other",
+      decisionSummary: "Rejected due to data training concerns and lack of enterprise security controls.",
+    });
+
+    const [req1] = await db.insert(requests).values({
+      trackingId: "ARC-001",
+      requesterId: mike.id,
+      department: "Engineering",
+      toolName: "ChatGPT Enterprise",
+      status: "approved",
+      requesterName: "Mike Thompson",
+      primaryGoal: "Code generation, documentation, and analysis assistance",
+      estimatedUsers: "department",
+      estimatedUsersCount: 45,
+      workflowIntegration: "IDE plugins, CI/CD pipeline documentation",
+      alternativesChecked: true,
+      alternativesText: "Evaluated GitHub Copilot, Amazon CodeWhisperer",
+      impactLevel: "high",
+      compatibility: ["outlook", "other"],
+      compatibilityNotes: "API integration with internal dev tools",
+      costStructure: "per_seat",
+      annualCost: "48000.00",
+      dataInput: ["internal_financials", "public"],
+      dataTraining: "no",
+      loginMethod: "SSO",
+      platformId: platform1.id,
+    }).returning();
+
+    await db.insert(reviewDecisions).values([
+      { requestId: req1.id, reviewerRole: "security", reviewerId: josh.id, decision: "pass", rationale: "SSO enforced, training disabled, data handling compliant with policy.", riskNotes: "Monitor for any changes to OpenAI data processing terms." },
+      { requestId: req1.id, reviewerRole: "technical_financial", reviewerId: jorge.id, decision: "pass", rationale: "API capabilities strong. Cost per seat reasonable for expected productivity gains. ROI estimated at 3x.", conditions: "Annual review of usage metrics required." },
+      { requestId: req1.id, reviewerRole: "chair", reviewerId: jeff.id, decision: "pass", rationale: "Aligns with digital transformation strategy. Approved for enterprise rollout." },
+      { requestId: req1.id, reviewerRole: "chair", reviewerId: kirun.id, decision: "pass", rationale: "IT governance requirements met. SSO and audit logging confirmed." },
+    ]);
+
+    const [req2] = await db.insert(requests).values({
+      trackingId: "ARC-002",
+      requesterId: sarah.id,
+      department: "Marketing",
+      toolName: "Jasper AI",
+      status: "pending_reviews",
+      requesterName: "Sarah Chen",
+      primaryGoal: "Marketing content creation and brand voice consistency",
+      estimatedUsers: "team",
+      estimatedUsersCount: 8,
+      workflowIntegration: "Content calendar workflow, social media scheduling tools",
+      alternativesChecked: true,
+      alternativesText: "Looked at Copy.ai and Writesonic",
+      impactLevel: "medium",
+      compatibility: ["outlook", "crm"],
+      costStructure: "monthly_subscription",
+      annualCost: "12000.00",
+      dataInput: ["public"],
+      dataTraining: "unsure",
+      loginMethod: "email_password",
+      platformId: platform2.id,
+    }).returning();
+
+    await db.insert(reviewDecisions).values({
+      requestId: req2.id, reviewerRole: "strategic", reviewerId: createdUsers.find(u => u.email === "leaanna@arc.io")!.id, decision: "pass", rationale: "Good strategic fit for marketing team. Content automation aligns with Q1 goals.",
+    });
+
+    await db.insert(riskFindings).values([
+      {
+        platformId: platform1.id,
+        classification: "low",
+        summary: "OpenAI updated terms of service for enterprise customers. No material changes to data handling.",
+        sources: [{ url: "https://openai.com/policies/terms-of-use", title: "OpenAI Terms of Service Update" }],
+        recommendedActions: "No action required. Continue monitoring.",
+        confidence: "high",
+      },
+      {
+        platformId: platform2.id,
+        classification: "medium",
+        summary: "Jasper AI reported a minor data exposure incident affecting free-tier users. Enterprise accounts not impacted per vendor statement.",
+        sources: [{ url: "https://jasper.ai/security", title: "Jasper Security Advisory" }],
+        recommendedActions: "Request formal incident report from vendor. Verify enterprise isolation.",
+        confidence: "medium",
+      },
+      {
+        platformId: platform3.id,
+        classification: "low",
+        summary: "Microsoft released security patch for Copilot M365 integration. Auto-updated for all tenants.",
+        sources: [{ url: "https://microsoft.com/security", title: "Microsoft Security Update" }],
+        recommendedActions: "Verify patch applied to tenant. No manual action needed.",
+        confidence: "high",
+      },
+    ]);
+
+    await db.insert(agentRunLogs).values({
+      initiatedBy: null,
+      scope: "all",
+      prompt: "Daily sweep for all Approved and On Review platforms",
+      platformsChecked: ["ChatGPT Enterprise", "Jasper AI", "Copilot for M365"],
+      resultsSummary: "3 platforms checked. 3 findings logged (2 low, 1 medium).",
+      findingsCount: 3,
+    });
+
+    await db.insert(platformAttributeDefinitions).values([
+      { name: "Contract Expiry", dataType: "date", required: false },
+      { name: "Data Residency", dataType: "dropdown", options: ["US", "EU", "APAC", "Global"], required: false },
+      { name: "SOC2 Certified", dataType: "boolean", required: false, defaultValue: "false" },
+    ]);
+  }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
