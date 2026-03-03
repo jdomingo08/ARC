@@ -3,7 +3,7 @@ import { eq, desc, and, ilike } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
-  agentRunLogs, auditLogs,
+  agentRunLogs, auditLogs, scanSchedules,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
@@ -12,6 +12,7 @@ import {
   type Tier, type InsertTier,
   type RiskFinding, type InsertRiskFinding,
   type AgentRunLog, type InsertAgentRunLog,
+  type ScanSchedule, type InsertScanSchedule,
   type AuditLog, type InsertAuditLog,
 } from "@shared/schema";
 
@@ -52,6 +53,11 @@ export interface IStorage {
 
   createAgentRunLog(log: InsertAgentRunLog): Promise<AgentRunLog>;
   getAllAgentRunLogs(): Promise<AgentRunLog[]>;
+  updateAgentRunLogStatus(id: string, status: string, resultsSummary?: string, findingsCount?: number): Promise<void>;
+  getRunningAgentLogs(): Promise<AgentRunLog[]>;
+
+  getScanSchedule(): Promise<ScanSchedule | undefined>;
+  upsertScanSchedule(data: Partial<InsertScanSchedule> & { id?: string }): Promise<ScanSchedule>;
 
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
@@ -195,6 +201,40 @@ export class DatabaseStorage implements IStorage {
 
   async getAllAgentRunLogs(): Promise<AgentRunLog[]> {
     return db.select().from(agentRunLogs).orderBy(desc(agentRunLogs.createdAt));
+  }
+
+  async updateAgentRunLogStatus(id: string, status: string, resultsSummary?: string, findingsCount?: number): Promise<void> {
+    const update: Record<string, any> = { status };
+    if (resultsSummary !== undefined) update.resultsSummary = resultsSummary;
+    if (findingsCount !== undefined) update.findingsCount = findingsCount;
+    await db.update(agentRunLogs).set(update).where(eq(agentRunLogs.id, id));
+  }
+
+  async getRunningAgentLogs(): Promise<AgentRunLog[]> {
+    return db.select().from(agentRunLogs).where(eq(agentRunLogs.status, "running"));
+  }
+
+  async getScanSchedule(): Promise<ScanSchedule | undefined> {
+    const [schedule] = await db.select().from(scanSchedules).limit(1);
+    return schedule;
+  }
+
+  async upsertScanSchedule(data: Partial<InsertScanSchedule> & { id?: string }): Promise<ScanSchedule> {
+    const existing = await this.getScanSchedule();
+    if (existing) {
+      const [updated] = await db.update(scanSchedules)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(scanSchedules.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(scanSchedules).values({
+      cronExpression: data.cronExpression || "0 0 * * *",
+      enabled: data.enabled ?? true,
+      scope: data.scope || "all",
+      createdBy: data.createdBy,
+    }).returning();
+    return created;
   }
 
   async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
