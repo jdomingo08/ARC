@@ -5,9 +5,91 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, ImpactBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, FilePlus, ArrowRight } from "lucide-react";
+import { FileText, FilePlus, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { Request } from "@shared/schema";
+import type { Request, ReviewDecision } from "@shared/schema";
+
+function ReviewProgressBar({ requestId }: { requestId: string }) {
+  const { data: reviews } = useQuery<ReviewDecision[]>({
+    queryKey: ["/api/requests", requestId, "reviews"],
+  });
+
+  const activeReviews = reviews?.filter(r => !r.superseded) || [];
+  const securityReview = activeReviews.find(r => r.reviewerRole === "security");
+  const techReview = activeReviews.find(r => r.reviewerRole === "technical_financial");
+  const chairReviews = activeReviews.filter(r => r.reviewerRole === "chair");
+  const chairPassed = chairReviews.some(r => r.decision === "pass");
+
+  type StepStatus = "pass" | "fail" | "pending" | "none";
+
+  const getStatus = (review: ReviewDecision | undefined, isChair?: boolean): StepStatus => {
+    if (isChair) {
+      if (chairReviews.length === 0) return "none";
+      if (chairReviews.some(r => r.decision === "fail")) return "fail";
+      if (chairPassed) return "pass";
+      return "pending";
+    }
+    if (!review) return "none";
+    if (review.decision === "pass") return "pass";
+    if (review.decision === "fail") return "fail";
+    return "pending";
+  };
+
+  const securityStatus = getStatus(securityReview);
+  const techStatus = getStatus(techReview);
+  const chairStatus = getStatus(undefined, true);
+
+  const steps: { label: string; status: StepStatus }[] = [
+    { label: "Security", status: securityStatus },
+    { label: "Financial", status: techStatus },
+    { label: "Chair", status: chairStatus },
+  ];
+
+  const getStepStyle = (status: StepStatus) => {
+    switch (status) {
+      case "pass":
+        return "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700";
+      case "fail":
+        return "bg-gray-900 text-white border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600";
+      case "pending":
+        return "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700";
+      case "none":
+      default:
+        return "bg-muted/40 text-muted-foreground border-border";
+    }
+  };
+
+  const getArrowColor = (fromStatus: StepStatus) => {
+    switch (fromStatus) {
+      case "pass":
+        return "text-green-500 dark:text-green-400";
+      case "fail":
+        return "text-gray-700 dark:text-gray-400";
+      case "pending":
+        return "text-yellow-500 dark:text-yellow-400";
+      default:
+        return "text-muted-foreground/40";
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      {steps.map((step, i) => (
+        <div key={step.label} className="flex items-center gap-1">
+          <div
+            className={`px-2 py-0.5 rounded text-[10px] font-medium border ${getStepStyle(step.status)}`}
+            title={`${step.label}: ${step.status === "none" ? "Not started" : step.status}`}
+          >
+            {step.label}
+          </div>
+          {i < steps.length - 1 && (
+            <ChevronRight className={`h-3 w-3 shrink-0 ${getArrowColor(step.status)}`} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function MyRequestsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
@@ -74,20 +156,22 @@ export default function MyRequestsPage() {
             <Link key={req.id} href={`/requests/${req.id}`}>
               <Card className="hover-elevate active-elevate-2 cursor-pointer">
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex items-center justify-center w-10 h-10 rounded-md bg-muted text-xs font-mono font-medium text-muted-foreground shrink-0">
-                        {req.trackingId}
-                      </div>
-                      <div className="min-w-0">
+                  <div className="flex flex-col gap-2">
+                    {/* Top row: tool name + tracking ID side by side, status + impact on right */}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
                         <p className="font-medium truncate" data-testid={`text-tool-${req.id}`}>{req.toolName}</p>
-                        <p className="text-sm text-muted-foreground">{req.department} - Submitted {formatDate(req.createdAt)}</p>
+                        <span className="text-xs font-mono text-muted-foreground shrink-0">{req.trackingId}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <ImpactBadge level={req.impactLevel} />
+                        <StatusBadge status={req.status} />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <ImpactBadge level={req.impactLevel} />
-                      <StatusBadge status={req.status} />
-                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    {/* Bottom row: progress bar + meta */}
+                    <div className="flex items-center justify-between gap-3">
+                      <ReviewProgressBar requestId={req.id} />
+                      <p className="text-xs text-muted-foreground shrink-0">{req.department} - {formatDate(req.createdAt)}</p>
                     </div>
                   </div>
                 </CardContent>

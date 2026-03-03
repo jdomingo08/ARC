@@ -234,9 +234,19 @@ function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, 
   const hasDecision = items.length > 0;
   const allPassed = requireCount ? passCount >= requireCount : items.some(r => r.decision === "pass");
   const hasFail = items.some(r => r.decision === "fail");
+  const isPending = hasDecision && !allPassed && !hasFail;
+
+  const getBorderColor = () => {
+    if (locked) return "border-border opacity-50";
+    if (!hasDecision && !optional) return "border-yellow-300 bg-yellow-50 dark:bg-yellow-900/10 dark:border-yellow-700";
+    if (allPassed) return "border-green-300 bg-green-50 dark:bg-green-900/10 dark:border-green-700";
+    if (hasFail) return "border-gray-700 bg-gray-100 dark:bg-gray-800/50 dark:border-gray-600";
+    if (isPending) return "border-yellow-300 bg-yellow-50 dark:bg-yellow-900/10 dark:border-yellow-700";
+    return "border-border";
+  };
 
   return (
-    <div className={`p-3 rounded-md border ${locked ? "opacity-50" : ""}`}>
+    <div className={`p-3 rounded-md border ${getBorderColor()}`}>
       <div className="flex items-center justify-between gap-1">
         <div>
           <p className="text-sm font-medium">{label}</p>
@@ -251,7 +261,7 @@ function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, 
         ) : optional ? (
           <span className="text-xs text-muted-foreground">Optional</span>
         ) : (
-          <span className="text-xs text-muted-foreground">Pending</span>
+          <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Pending</span>
         )}
       </div>
       {items.map((r, i) => (

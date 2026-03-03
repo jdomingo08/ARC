@@ -175,10 +175,19 @@ function TiersTab() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [requiredControls, setRequiredControls] = useState("");
+  const [allowedDataTypes, setAllowedDataTypes] = useState("");
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/tiers", { name, description });
+      const payload: any = { name, description };
+      if (requiredControls.trim()) {
+        payload.requiredControls = requiredControls.split(",").map(c => c.trim()).filter(Boolean);
+      }
+      if (allowedDataTypes.trim()) {
+        payload.allowedDataTypes = allowedDataTypes.split(",").map(d => d.trim()).filter(Boolean);
+      }
+      const res = await apiRequest("POST", "/api/admin/tiers", payload);
       return res.json();
     },
     onSuccess: () => {
@@ -187,6 +196,8 @@ function TiersTab() {
       setOpen(false);
       setName("");
       setDescription("");
+      setRequiredControls("");
+      setAllowedDataTypes("");
     },
   });
 
@@ -197,7 +208,7 @@ function TiersTab() {
       <CardHeader className="flex flex-row items-center justify-between gap-1">
         <div>
           <CardTitle>Platform Tiers</CardTitle>
-          <CardDescription>Define tiers for categorizing approved platforms</CardDescription>
+          <CardDescription>Define tiers for categorizing approved platforms. Add as many tiers as needed.</CardDescription>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -208,7 +219,7 @@ function TiersTab() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>New Tier</DialogTitle>
-              <DialogDescription>Define a new platform classification tier</DialogDescription>
+              <DialogDescription>Define a new platform classification tier. You can create unlimited tiers to match your governance needs.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
@@ -218,6 +229,14 @@ function TiersTab() {
               <div className="space-y-2">
                 <Label>Description</Label>
                 <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe the tier requirements and policies" data-testid="input-tier-desc" />
+              </div>
+              <div className="space-y-2">
+                <Label>Required Controls (comma-separated)</Label>
+                <Input value={requiredControls} onChange={e => setRequiredControls(e.target.value)} placeholder="e.g., SSO, MFA, Data Encryption, DLP" data-testid="input-tier-controls" />
+              </div>
+              <div className="space-y-2">
+                <Label>Allowed Data Types (comma-separated)</Label>
+                <Input value={allowedDataTypes} onChange={e => setAllowedDataTypes(e.target.value)} placeholder="e.g., Public, Internal, PII, Client Data" data-testid="input-tier-data-types" />
               </div>
               <Button onClick={() => createMutation.mutate()} disabled={!name || createMutation.isPending} className="w-full" data-testid="button-save-tier">
                 {createMutation.isPending ? "Creating..." : "Create Tier"}
@@ -235,14 +254,21 @@ function TiersTab() {
                 <p className="text-xs text-muted-foreground mt-1">{tier.description || "No description"}</p>
                 {tier.requiredControls && Array.isArray(tier.requiredControls) && (tier.requiredControls as string[]).length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
+                    <span className="text-xs text-muted-foreground mr-1">Controls:</span>
                     {(tier.requiredControls as string[]).map((c, i) => <Badge key={i} variant="outline">{c}</Badge>)}
+                  </div>
+                )}
+                {tier.allowedDataTypes && Array.isArray(tier.allowedDataTypes) && (tier.allowedDataTypes as string[]).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <span className="text-xs text-muted-foreground mr-1">Data Types:</span>
+                    {(tier.allowedDataTypes as string[]).map((d, i) => <Badge key={i} variant="secondary">{d}</Badge>)}
                   </div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-muted-foreground text-center py-8">No tiers defined yet</p>
+          <p className="text-muted-foreground text-center py-8">No tiers defined yet. Click "Add Tier" to create your first tier.</p>
         )}
       </CardContent>
     </Card>
