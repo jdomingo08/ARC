@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "wouter";
+import { useState, useMemo } from "react";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,12 +8,19 @@ import { StatusBadge, ImpactBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Server, Search, ArrowRight, DollarSign, Calendar } from "lucide-react";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import type { Platform, Tier } from "@shared/schema";
+
+type SortField = "toolName" | "status" | "department" | "tier" | "impactLevel" | "annualCost" | "lastReviewedAt";
 
 export default function PlatformListPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [sortField, setSortField] = useState<SortField>("toolName");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [, setLocation] = useLocation();
   const { data: platforms, isLoading } = useQuery<Platform[]>({ queryKey: ["/api/platforms"] });
   const { data: tiers } = useQuery<Tier[]>({ queryKey: ["/api/admin/tiers"] });
 
@@ -37,6 +44,57 @@ export default function PlatformListPage() {
     if (!cost || cost === "0") return "Free";
     return `$${Number(cost).toLocaleString()}/yr`;
   };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDirection === "asc"
+      ? <ChevronUp className="h-3 w-3 ml-1" />
+      : <ChevronDown className="h-3 w-3 ml-1" />;
+  };
+
+  const sorted = useMemo(() => {
+    if (viewMode !== "list") return filtered;
+    const items = [...filtered];
+    items.sort((a, b) => {
+      const dir = sortDirection === "asc" ? 1 : -1;
+      switch (sortField) {
+        case "toolName":
+          return dir * a.toolName.localeCompare(b.toolName);
+        case "status":
+          return dir * (a.status || "").localeCompare(b.status || "");
+        case "department":
+          return dir * (a.department || "").localeCompare(b.department || "");
+        case "tier": {
+          const tA = getTierName(a.tierId) || "";
+          const tB = getTierName(b.tierId) || "";
+          return dir * tA.localeCompare(tB);
+        }
+        case "impactLevel": {
+          const order: Record<string, number> = { high: 3, medium: 2, low: 1 };
+          return dir * ((order[a.impactLevel || ""] || 0) - (order[b.impactLevel || ""] || 0));
+        }
+        case "annualCost":
+          return dir * (Number(a.annualCost || 0) - Number(b.annualCost || 0));
+        case "lastReviewedAt": {
+          const dA = a.lastReviewedAt ? new Date(a.lastReviewedAt).getTime() : 0;
+          const dB = b.lastReviewedAt ? new Date(b.lastReviewedAt).getTime() : 0;
+          return dir * (dA - dB);
+        }
+        default:
+          return 0;
+      }
+    });
+    return items;
+  }, [filtered, sortField, sortDirection, viewMode, tiers]);
 
   if (isLoading) {
     return (
@@ -80,6 +138,24 @@ export default function PlatformListPage() {
             <SelectItem value="retired">Retired</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-1 ml-auto">
+          <Button
+            variant={viewMode === "grid" ? "secondary" : "ghost"}
+            size="icon"
+            onClick={() => setViewMode("grid")}
+            aria-label="Grid view"
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={viewMode === "list" ? "secondary" : "ghost"}
+            size="icon"
+            onClick={() => setViewMode("list")}
+            aria-label="List view"
+          >
+            <List className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -89,7 +165,7 @@ export default function PlatformListPage() {
             <p className="text-muted-foreground">No platforms found</p>
           </CardContent>
         </Card>
-      ) : (
+      ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(platform => (
             <Link key={platform.id} href={`/platforms/${platform.id}`}>
@@ -128,6 +204,62 @@ export default function PlatformListPage() {
               </Card>
             </Link>
           ))}
+        </div>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {([
+                  { field: "toolName" as SortField, label: "Name" },
+                  { field: "status" as SortField, label: "Status" },
+                  { field: "department" as SortField, label: "Department" },
+                  { field: "tier" as SortField, label: "Tier" },
+                  { field: "impactLevel" as SortField, label: "Impact" },
+                  { field: "annualCost" as SortField, label: "Annual Cost", align: "right" as const },
+                  { field: "lastReviewedAt" as SortField, label: "Last Reviewed" },
+                ]).map(col => (
+                  <TableHead
+                    key={col.field}
+                    className={`cursor-pointer select-none ${"align" in col && col.align === "right" ? "text-right" : ""}`}
+                    onClick={() => handleSort(col.field)}
+                  >
+                    <div className={`flex items-center ${"align" in col && col.align === "right" ? "justify-end" : ""}`}>
+                      {col.label}
+                      <SortIcon field={col.field} />
+                    </div>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map(platform => (
+                <TableRow
+                  key={platform.id}
+                  className="cursor-pointer"
+                  onClick={() => setLocation(`/platforms/${platform.id}`)}
+                >
+                  <TableCell className="font-medium">{platform.toolName}</TableCell>
+                  <TableCell><StatusBadge status={platform.status} /></TableCell>
+                  <TableCell className="text-muted-foreground">{platform.department || "\u2014"}</TableCell>
+                  <TableCell>
+                    {getTierName(platform.tierId)
+                      ? <Badge variant="outline">{getTierName(platform.tierId)}</Badge>
+                      : <span className="text-muted-foreground">{"\u2014"}</span>}
+                  </TableCell>
+                  <TableCell>
+                    {platform.impactLevel
+                      ? <ImpactBadge level={platform.impactLevel} />
+                      : <span className="text-muted-foreground">{"\u2014"}</span>}
+                  </TableCell>
+                  <TableCell className="text-right">{formatCost(platform.annualCost)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {platform.lastReviewedAt ? formatDate(platform.lastReviewedAt) : formatDate(platform.createdAt)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
