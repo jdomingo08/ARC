@@ -38,6 +38,7 @@ export interface IStorage {
   getPlatformByToolName(toolName: string): Promise<Platform | undefined>;
   getAllPlatforms(): Promise<Platform[]>;
   updatePlatform(id: string, data: Partial<Platform>): Promise<Platform | undefined>;
+  deletePlatform(id: string): Promise<boolean>;
 
   createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition>;
   getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]>;
@@ -150,6 +151,11 @@ export class DatabaseStorage implements IStorage {
   async updatePlatform(id: string, data: Partial<Platform>): Promise<Platform | undefined> {
     const [updated] = await db.update(platforms).set({ ...data, updatedAt: new Date() }).where(eq(platforms.id, id)).returning();
     return updated;
+  }
+
+  async deletePlatform(id: string): Promise<boolean> {
+    const result = await db.delete(platforms).where(eq(platforms.id, id)).returning();
+    return result.length > 0;
   }
 
   async createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition> {

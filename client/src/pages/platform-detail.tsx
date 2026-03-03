@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -23,6 +23,7 @@ import {
   FileText,
   AlertTriangle,
   ExternalLink,
+  Trash2,
 } from "lucide-react";
 import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition } from "@shared/schema";
 
@@ -30,6 +31,7 @@ export default function PlatformDetailPage() {
   const [, params] = useRoute("/platforms/:id");
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const id = params?.id;
 
   const { data: platform, isLoading } = useQuery<Platform>({
@@ -58,6 +60,21 @@ export default function PlatformDetailPage() {
     onSuccess: () => {
       toast({ title: "Tier Updated" });
       queryClient.invalidateQueries({ queryKey: ["/api/platforms", id] });
+    },
+  });
+
+  const deletePlatformMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", `/api/admin/platforms/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Platform Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms"] });
+      setLocation("/platforms");
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
 
@@ -110,16 +127,32 @@ export default function PlatformDetailPage() {
           <p className="text-muted-foreground mt-1">{platform.primaryGoal || "No description"}</p>
         </div>
         {isAdmin && (
-          <Select value={platform.tierId || ""} onValueChange={v => updateTierMutation.mutate(v)}>
-            <SelectTrigger className="w-[200px]" data-testid="select-tier">
-              <SelectValue placeholder="Assign Tier" />
-            </SelectTrigger>
-            <SelectContent>
-              {tiers?.map(t => (
-                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-              ))}
+          <div className="flex items-center gap-2">
+            <Select value={platform.tierId || ""} onValueChange={v => updateTierMutation.mutate(v)}>
+              <SelectTrigger className="w-[200px]" data-testid="select-tier">
+                <SelectValue placeholder="Assign Tier" />
+              </SelectTrigger>
+              <SelectContent>
+                {tiers?.map(t => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
             </SelectContent>
-          </Select>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive hover:border-destructive"
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to delete "${platform.toolName}"? This cannot be undone.`)) {
+                  deletePlatformMutation.mutate();
+                }
+              }}
+              disabled={deletePlatformMutation.isPending}
+              data-testid="button-delete-platform"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
 

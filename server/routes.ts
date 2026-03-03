@@ -286,6 +286,58 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/platforms", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const data = req.body;
+      if (!data.toolName) return res.status(400).json({ message: "Tool name is required" });
+
+      const existing = await storage.getPlatformByToolName(data.toolName);
+      if (existing) return res.status(409).json({ message: "A platform with that name already exists" });
+
+      data.ownerId = user.id;
+      if (!data.status) data.status = "on_review";
+      const platform = await storage.createPlatform(data);
+
+      await storage.createAuditLog({
+        entityType: "platform",
+        entityId: platform.id,
+        action: "created",
+        before: null,
+        after: platform,
+        actorId: user.id,
+      });
+
+      res.json(platform);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/platforms/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const platform = await storage.getPlatform(req.params.id as string);
+      if (!platform) return res.status(404).json({ message: "Platform not found" });
+
+      await storage.createAuditLog({
+        entityType: "platform",
+        entityId: req.params.id as string,
+        action: "deleted",
+        before: platform,
+        after: null,
+        actorId: user.id,
+      });
+
+      const deleted = await storage.deletePlatform(req.params.id as string);
+      if (!deleted) return res.status(404).json({ message: "Platform not found" });
+
+      res.json({ message: "Platform deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/platforms", requireAuth, async (_req, res) => {
     try {
       const allPlatforms = await storage.getAllPlatforms();
