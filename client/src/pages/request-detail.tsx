@@ -24,6 +24,7 @@ import {
   Key,
   Database,
   CheckCircle2,
+  ChevronDown,
 } from "lucide-react";
 import type { Request, ReviewDecision, AuditLog } from "@shared/schema";
 
@@ -174,11 +175,20 @@ export default function RequestDetailPage() {
               <CardTitle className="text-lg">Review Status</CardTitle>
               <CardDescription>Approval workflow progress</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <ReviewStep label="Strategic Review" subtitle="Advisory" review={strategicReview} optional />
+            <CardContent className="space-y-0">
               <ReviewStep label="Security Review" subtitle="Required" review={securityReview} />
+              <ProgressArrow status={securityReview?.decision} />
               <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} />
+              <ProgressArrow status={techReview?.decision} />
               <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} />
+              {strategicReview && (
+                <>
+                  <div className="mt-4 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground mb-2">Advisory</p>
+                    <ReviewStep label="Strategic Review" subtitle="Advisory" review={strategicReview} optional />
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -216,6 +226,27 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
         <p className="text-xs text-muted-foreground">{label}</p>
         <div className="text-sm font-medium">{typeof value === "string" ? value : value}</div>
       </div>
+    </div>
+  );
+}
+
+function ProgressArrow({ status }: { status?: string }) {
+  const getColor = () => {
+    switch (status) {
+      case "pass":
+        return "text-green-500 dark:text-green-400";
+      case "fail":
+        return "text-gray-700 dark:text-gray-400";
+      case "needs_more_info":
+        return "text-yellow-500 dark:text-yellow-400";
+      default:
+        return "text-muted-foreground/30";
+    }
+  };
+
+  return (
+    <div className="flex justify-center py-1">
+      <ChevronDown className={`h-5 w-5 ${getColor()}`} />
     </div>
   );
 }
