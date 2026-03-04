@@ -80,6 +80,19 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/users", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const { name, email, department, role } = req.body;
+      if (!name || !email) return res.status(400).json({ message: "Name and email are required" });
+      const existing = await storage.getUserByEmail(email);
+      if (existing) return res.status(409).json({ message: "A user with that email already exists" });
+      const user = await storage.createUser({ name, email, department: department || null, role: role || "requester" });
+      res.json(user);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/requests", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user as User;
@@ -418,6 +431,16 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/attributes/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteAttributeDefinition(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Attribute not found" });
+      res.json({ message: "Attribute deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/tiers", requireAuth, async (_req, res) => {
     try {
       const allTiers = await storage.getAllTiers();
@@ -433,6 +456,26 @@ export async function registerRoutes(
       if (!name) return res.status(400).json({ message: "Name is required" });
       const tier = await storage.createTier(req.body);
       res.json(tier);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/tiers/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const updated = await storage.updateTier(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Tier not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/tiers/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteTier(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Tier not found" });
+      res.json({ message: "Tier deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -454,6 +497,18 @@ export async function registerRoutes(
       const updated = await storage.updateUserRole(req.params.id, role, reviewerRole);
       if (!updated) return res.status(404).json({ message: "User not found" });
       res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      if (user.id === req.params.id) return res.status(400).json({ message: "Cannot delete yourself" });
+      const deleted = await storage.deleteUser(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "User not found" });
+      res.json({ message: "User deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

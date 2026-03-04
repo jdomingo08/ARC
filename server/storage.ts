@@ -42,10 +42,15 @@ export interface IStorage {
 
   createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition>;
   getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]>;
+  deleteAttributeDefinition(id: string): Promise<boolean>;
 
   createTier(tier: InsertTier): Promise<Tier>;
   getAllTiers(): Promise<Tier[]>;
   getTier(id: string): Promise<Tier | undefined>;
+  updateTier(id: string, data: Partial<Tier>): Promise<Tier | undefined>;
+  deleteTier(id: string): Promise<boolean>;
+
+  deleteUser(id: string): Promise<boolean>;
 
   createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding>;
   getRiskFindingsByPlatform(platformId: string): Promise<RiskFinding[]>;
@@ -167,6 +172,11 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(platformAttributeDefinitions).orderBy(platformAttributeDefinitions.name);
   }
 
+  async deleteAttributeDefinition(id: string): Promise<boolean> {
+    const result = await db.delete(platformAttributeDefinitions).where(eq(platformAttributeDefinitions.id, id)).returning();
+    return result.length > 0;
+  }
+
   async createTier(tier: InsertTier): Promise<Tier> {
     const [created] = await db.insert(tiers).values(tier).returning();
     return created;
@@ -179,6 +189,21 @@ export class DatabaseStorage implements IStorage {
   async getTier(id: string): Promise<Tier | undefined> {
     const [tier] = await db.select().from(tiers).where(eq(tiers.id, id));
     return tier;
+  }
+
+  async updateTier(id: string, data: Partial<Tier>): Promise<Tier | undefined> {
+    const [updated] = await db.update(tiers).set(data).where(eq(tiers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTier(id: string): Promise<boolean> {
+    const result = await db.delete(tiers).where(eq(tiers.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
   }
 
   async createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding> {
