@@ -3,7 +3,7 @@ import { eq, desc, and, ilike } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
-  agentRunLogs, auditLogs,
+  agentRunLogs, auditLogs, requestComments, requestAttachments,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
@@ -13,6 +13,8 @@ import {
   type RiskFinding, type InsertRiskFinding,
   type AgentRunLog, type InsertAgentRunLog,
   type AuditLog, type InsertAuditLog,
+  type RequestComment, type InsertRequestComment,
+  type RequestAttachment, type InsertRequestAttachment,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -61,6 +63,15 @@ export interface IStorage {
 
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
+
+  createRequestComment(comment: InsertRequestComment): Promise<RequestComment>;
+  getCommentsByRequest(requestId: string): Promise<RequestComment[]>;
+  deleteRequestComment(id: string): Promise<boolean>;
+
+  createRequestAttachment(attachment: InsertRequestAttachment): Promise<RequestAttachment>;
+  getAttachmentsByRequest(requestId: string): Promise<RequestAttachment[]>;
+  getAttachment(id: string): Promise<RequestAttachment | undefined>;
+  deleteRequestAttachment(id: string): Promise<boolean>;
 
   seedData(): Promise<void>;
 }
@@ -237,6 +248,39 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(auditLogs)
       .where(and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)))
       .orderBy(desc(auditLogs.timestamp));
+  }
+
+  async createRequestComment(comment: InsertRequestComment): Promise<RequestComment> {
+    const [created] = await db.insert(requestComments).values(comment).returning();
+    return created;
+  }
+
+  async getCommentsByRequest(requestId: string): Promise<RequestComment[]> {
+    return db.select().from(requestComments).where(eq(requestComments.requestId, requestId)).orderBy(desc(requestComments.createdAt));
+  }
+
+  async deleteRequestComment(id: string): Promise<boolean> {
+    const result = await db.delete(requestComments).where(eq(requestComments.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async createRequestAttachment(attachment: InsertRequestAttachment): Promise<RequestAttachment> {
+    const [created] = await db.insert(requestAttachments).values(attachment).returning();
+    return created;
+  }
+
+  async getAttachmentsByRequest(requestId: string): Promise<RequestAttachment[]> {
+    return db.select().from(requestAttachments).where(eq(requestAttachments.requestId, requestId)).orderBy(desc(requestAttachments.createdAt));
+  }
+
+  async getAttachment(id: string): Promise<RequestAttachment | undefined> {
+    const [attachment] = await db.select().from(requestAttachments).where(eq(requestAttachments.id, id));
+    return attachment;
+  }
+
+  async deleteRequestAttachment(id: string): Promise<boolean> {
+    const result = await db.delete(requestAttachments).where(eq(requestAttachments.id, id)).returning();
+    return result.length > 0;
   }
 
   async seedData(): Promise<void> {
