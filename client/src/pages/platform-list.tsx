@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -17,8 +17,37 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers, Settings2 } from "lucide-react";
+import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers, Settings2, ImageIcon } from "lucide-react";
 import type { Platform, Tier } from "@shared/schema";
+
+function PlatformLogo({ platform, size = 20 }: { platform: Platform; size?: number }) {
+  const [error, setError] = useState(false);
+  const logoUrl = platform.logoUrl;
+
+  if (!logoUrl || error) {
+    return (
+      <div
+        className="rounded bg-muted flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <span className="text-[10px] font-bold text-muted-foreground">
+          {platform.toolName.charAt(0).toUpperCase()}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={logoUrl}
+      alt={`${platform.toolName} logo`}
+      width={size}
+      height={size}
+      className="rounded shrink-0"
+      onError={() => setError(true)}
+    />
+  );
+}
 
 type SortField = "toolName" | "status" | "department" | "tier" | "impactLevel" | "annualCost" | "lastReviewedAt";
 
@@ -62,6 +91,30 @@ export default function PlatformListPage() {
   const { data: tiers } = useQuery<Tier[]>({ queryKey: ["/api/admin/tiers"] });
 
   const isAdmin = user?.role === "admin" || user?.role === "chair";
+
+  // Auto-resolve logos for platforms missing them
+  const logoResolveRef = useRef(false);
+  const resolveLogosMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/platforms/resolve-logos");
+      return res.json();
+    },
+    onSuccess: (data: { updated: number }) => {
+      if (data.updated > 0) {
+        queryClient.invalidateQueries({ queryKey: ["/api/platforms"] });
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (isAdmin && platforms && !logoResolveRef.current) {
+      const missingLogos = platforms.some(p => !p.logoUrl);
+      if (missingLogos) {
+        logoResolveRef.current = true;
+        resolveLogosMutation.mutate();
+      }
+    }
+  }, [platforms, isAdmin]);
 
   // Add Platform dialog state
   const [addOpen, setAddOpen] = useState(false);
@@ -272,7 +325,12 @@ export default function PlatformListPage() {
   const renderCellContent = (platform: Platform, field: SortField) => {
     switch (field) {
       case "toolName":
-        return <span className="font-medium">{platform.toolName}</span>;
+        return (
+          <div className="flex items-center gap-2">
+            <PlatformLogo platform={platform} size={20} />
+            <span className="font-medium">{platform.toolName}</span>
+          </div>
+        );
       case "status":
         if (isAdmin) {
           return (
@@ -497,6 +555,7 @@ export default function PlatformListPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        <PlatformLogo platform={platform} size={20} />
                         <h3 className="font-semibold truncate" data-testid={`text-platform-${platform.id}`}>{platform.toolName}</h3>
                         {isAdmin ? (
                           <div onClick={e => e.preventDefault()}>
@@ -703,6 +762,7 @@ function TierGroupView({
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
+                              <PlatformLogo platform={platform} size={18} />
                               <h4 className="font-semibold text-sm truncate">{platform.toolName}</h4>
                               {isAdmin ? (
                                 <div onClick={e => e.preventDefault()}>

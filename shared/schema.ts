@@ -112,6 +112,7 @@ export const platforms = pgTable("platforms", {
   loginMethod: text("login_method"),
   decisionSummary: text("decision_summary"),
   approvalDate: timestamp("approval_date"),
+  logoUrl: text("logo_url"),
   dynamicAttributes: jsonb("dynamic_attributes").default({}),
   ownerId: varchar("owner_id", { length: 36 }),
   lastReviewedAt: timestamp("last_reviewed_at"),

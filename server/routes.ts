@@ -7,6 +7,7 @@ import fs from "fs";
 import { storage } from "./storage";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
+import { getLogoUrl } from "./logo-resolver";
 import type { User } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -56,6 +57,9 @@ export async function registerRoutes(
   );
 
   await storage.seedData();
+
+  // Initialize AI/LLM provider for risk scanning
+  const llmProvider = createLLMProvider();
 
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -364,6 +368,7 @@ export async function registerRoutes(
 
       data.ownerId = user.id;
       if (!data.status) data.status = "on_review";
+      if (!data.logoUrl) data.logoUrl = getLogoUrl(data.toolName);
       const platform = await storage.createPlatform(data);
 
       await storage.createAuditLog({
@@ -460,6 +465,24 @@ export async function registerRoutes(
       const allReqs = await storage.getAllRequests();
       const linked = allReqs.filter(r => r.platformId === req.params.id);
       res.json(linked);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Batch resolve logos for all platforms that don't have one
+  app.post("/api/admin/platforms/resolve-logos", requireAuth, requireRole("admin", "chair"), async (_req, res) => {
+    try {
+      const allPlatforms = await storage.getAllPlatforms();
+      let updated = 0;
+      for (const platform of allPlatforms) {
+        if (!platform.logoUrl) {
+          const logoUrl = getLogoUrl(platform.toolName);
+          await storage.updatePlatform(platform.id, { logoUrl });
+          updated++;
+        }
+      }
+      res.json({ message: `Resolved logos for ${updated} platforms`, updated });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
