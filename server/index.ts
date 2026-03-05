@@ -2,6 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { RiskScheduler } from "./risk-agent/scheduler";
+import { storage } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
@@ -61,6 +63,12 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+
+  // Initialize risk scan scheduler
+  const riskScheduler = new RiskScheduler(storage);
+  await riskScheduler.initialize();
+  // Make scheduler accessible to route handlers for live reload
+  (globalThis as any).__riskScheduler = riskScheduler;
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

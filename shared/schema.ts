@@ -39,6 +39,12 @@ export type Confidence = z.infer<typeof confidenceEnum>;
 export const attributeTypeEnum = z.enum(["text", "number", "dropdown", "multi_select", "date", "boolean"]);
 export type AttributeType = z.infer<typeof attributeTypeEnum>;
 
+export const runStatusEnum = z.enum(["running", "completed", "failed"]);
+export type RunStatus = z.infer<typeof runStatusEnum>;
+
+export const runTriggerEnum = z.enum(["manual", "scheduled"]);
+export type RunTrigger = z.infer<typeof runTriggerEnum>;
+
 export const users = pgTable("users", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -152,7 +158,20 @@ export const agentRunLogs = pgTable("agent_run_logs", {
   platformsChecked: jsonb("platforms_checked"),
   resultsSummary: text("results_summary"),
   findingsCount: integer("findings_count").default(0),
+  status: text("status").notNull().default("completed"),
+  trigger: text("trigger").notNull().default("manual"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const scanSchedules = pgTable("scan_schedules", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  cronExpression: text("cron_expression").notNull().default("0 0 * * *"),
+  enabled: boolean("enabled").notNull().default(true),
+  scope: text("scope").notNull().default("all"),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdBy: varchar("created_by", { length: 36 }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const auditLogs = pgTable("audit_logs", {
@@ -195,6 +214,7 @@ export const insertAttributeDefinitionSchema = createInsertSchema(platformAttrib
 export const insertTierSchema = createInsertSchema(tiers).omit({ id: true, createdAt: true });
 export const insertRiskFindingSchema = createInsertSchema(riskFindings).omit({ id: true, createdAt: true });
 export const insertAgentRunLogSchema = createInsertSchema(agentRunLogs).omit({ id: true, createdAt: true });
+export const insertScanScheduleSchema = createInsertSchema(scanSchedules).omit({ id: true, updatedAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, timestamp: true });
 export const insertRequestCommentSchema = createInsertSchema(requestComments).omit({ id: true, createdAt: true });
 export const insertRequestAttachmentSchema = createInsertSchema(requestAttachments).omit({ id: true, createdAt: true });
@@ -215,6 +235,8 @@ export type RiskFinding = typeof riskFindings.$inferSelect;
 export type InsertRiskFinding = z.infer<typeof insertRiskFindingSchema>;
 export type AgentRunLog = typeof agentRunLogs.$inferSelect;
 export type InsertAgentRunLog = z.infer<typeof insertAgentRunLogSchema>;
+export type ScanSchedule = typeof scanSchedules.$inferSelect;
+export type InsertScanSchedule = z.infer<typeof insertScanScheduleSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type RequestComment = typeof requestComments.$inferSelect;

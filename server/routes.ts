@@ -5,6 +5,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { storage } from "./storage";
+import { createLLMProvider } from "./ai/provider";
+import { RiskScanner } from "./risk-agent/scanner";
 import type { User } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -563,6 +565,18 @@ export async function registerRoutes(
 
   app.post("/api/risk/run", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
     try {
+      if (!llmProvider) {
+        return res.status(503).json({
+          message: "AI provider not configured. Set OPENAI_API_KEY environment variable to enable risk scanning.",
+        });
+      }
+
+      // Check for concurrent scan
+      const runningLogs = await storage.getRunningAgentLogs();
+      if (runningLogs.length > 0) {
+        return res.status(409).json({ message: "A risk scan is already in progress. Please wait for it to complete." });
+      }
+
       const user = (req as any).user as User;
       const { scope, platformId } = req.body;
       let platformsToCheck: any[] = [];
@@ -575,40 +589,52 @@ export async function registerRoutes(
         platformsToCheck = all.filter(p => p.status === "approved" || p.status === "on_review");
       }
 
-      const findings: any[] = [];
-      const riskTemplates = [
-        { classification: "low", summary: "No significant security events reported. Vendor maintains SOC2 compliance.", recommendedActions: "Continue standard monitoring.", confidence: "high" },
-        { classification: "low", summary: "Minor terms of service update. No material changes to data handling.", recommendedActions: "Review updated terms. No urgent action.", confidence: "high" },
-        { classification: "medium", summary: "Vendor reported a non-critical vulnerability in authentication module. Patch released.", recommendedActions: "Verify patch has been applied. Review access logs.", confidence: "medium" },
-        { classification: "medium", summary: "Third-party audit identified potential data residency concerns for EU customers.", recommendedActions: "Request data residency documentation. Review DPA terms.", confidence: "medium" },
-        { classification: "high", summary: "Industry report flags potential data handling concerns. Vendor under regulatory investigation.", recommendedActions: "Escalate to security team. Consider pausing new enrollments.", confidence: "low" },
-      ];
-
-      for (const platform of platformsToCheck) {
-        const template = riskTemplates[Math.floor(Math.random() * riskTemplates.length)];
-        const finding = await storage.createRiskFinding({
-          platformId: platform.id,
-          classification: template.classification,
-          summary: `[${platform.toolName}] ${template.summary}`,
-          sources: [{ url: `https://security-feed.example.com/${platform.toolName.toLowerCase().replace(/\s+/g, '-')}`, title: `Security Feed - ${platform.toolName}` }],
-          recommendedActions: template.recommendedActions,
-          confidence: template.confidence,
-        });
-        findings.push(finding);
+      if (platformsToCheck.length === 0) {
+        return res.status(400).json({ message: "No platforms to scan." });
       }
 
-      const log = await storage.createAgentRunLog({
-        initiatedBy: user.id,
-        scope: scope === "single" ? platformsToCheck[0]?.toolName || "unknown" : "all",
-        prompt: scope === "single" ? `Check for breaches/news for ${platformsToCheck[0]?.toolName}` : "Run today's sweep for all Approved + On Review tools",
-        platformsChecked: platformsToCheck.map((p: any) => p.toolName),
-        resultsSummary: `${platformsToCheck.length} platforms checked. ${findings.length} findings logged.`,
-        findingsCount: findings.length,
+      // Set up SSE streaming
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      const scanner = new RiskScanner(llmProvider, storage);
+
+      const sendEvent = (event: string, data: any) => {
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      scanner.on("scan-start", (data) => sendEvent("scan-start", data));
+      scanner.on("platform-start", (data) => sendEvent("platform-start", data));
+      scanner.on("finding", (data) => sendEvent("finding", data));
+      scanner.on("platform-complete", (data) => sendEvent("platform-complete", data));
+      scanner.on("platform-error", (data) => sendEvent("platform-error", data));
+      scanner.on("complete", (data) => {
+        sendEvent("complete", data);
+        res.end();
+      });
+      scanner.on("error", (data) => {
+        sendEvent("error", data);
+        res.end();
       });
 
-      res.json({ log, findings });
+      // Handle client disconnect
+      req.on("close", () => {
+        scanner.abort();
+      });
+
+      const scopeLabel = scope === "single"
+        ? platformsToCheck[0]?.toolName || "unknown"
+        : "all";
+
+      await scanner.scanPlatforms(platformsToCheck, user.id, "manual", scopeLabel);
     } catch (e: any) {
-      res.status(500).json({ message: e.message });
+      // If headers already sent (SSE started), we can't send JSON error
+      if (!res.headersSent) {
+        res.status(500).json({ message: e.message });
+      }
     }
   });
 
@@ -625,6 +651,46 @@ export async function registerRoutes(
     try {
       const findings = await storage.getAllRiskFindings();
       res.json(findings);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // AI provider status check
+  app.get("/api/risk/status", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+    res.json({
+      aiConfigured: llmProvider !== null,
+      provider: llmProvider?.name || null,
+    });
+  });
+
+  // Schedule management endpoints
+  app.get("/api/risk/schedule", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+    try {
+      const schedule = await storage.getScanSchedule();
+      res.json(schedule || { enabled: false, cronExpression: "0 0 * * *", scope: "all" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.put("/api/risk/schedule", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const { enabled, cronExpression, scope } = req.body;
+      const schedule = await storage.upsertScanSchedule({
+        enabled,
+        cronExpression,
+        scope,
+        createdBy: user.id,
+      });
+
+      // Notify scheduler to reload (handled via export)
+      if ((globalThis as any).__riskScheduler) {
+        (globalThis as any).__riskScheduler.reload(schedule);
+      }
+
+      res.json(schedule);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
