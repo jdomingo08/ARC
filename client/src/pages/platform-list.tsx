@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers } from "lucide-react";
 import type { Platform, Tier } from "@shared/schema";
 
 type SortField = "toolName" | "status" | "department" | "tier" | "impactLevel" | "annualCost" | "lastReviewedAt";
@@ -23,7 +23,7 @@ type SortField = "toolName" | "status" | "department" | "tier" | "impactLevel" |
 export default function PlatformListPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list" | "tier">("grid");
   const [sortField, setSortField] = useState<SortField>("toolName");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [, setLocation] = useLocation();
@@ -82,6 +82,47 @@ export default function PlatformListPage() {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
+
+  const changeTierMutation = useMutation({
+    mutationFn: async ({ platformId, tierId }: { platformId: string; tierId: string | null }) => {
+      const res = await apiRequest("PATCH", `/api/platforms/${platformId}`, { tierId });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Tier Updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Drag state for tier view
+  const [dragPlatformId, setDragPlatformId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, platformId: string) => {
+    if (!isAdmin) return;
+    e.dataTransfer.setData("platformId", platformId);
+    setDragPlatformId(platformId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent, tierId: string | null) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    const platformId = e.dataTransfer.getData("platformId");
+    if (platformId) {
+      const platform = platforms?.find(p => p.id === platformId);
+      if (platform && platform.tierId !== tierId) {
+        changeTierMutation.mutate({ platformId, tierId });
+      }
+    }
+    setDragPlatformId(null);
+  };
 
   const handleDelete = (e: React.MouseEvent, platformId: string, platformName: string) => {
     e.preventDefault();
@@ -279,6 +320,14 @@ export default function PlatformListPage() {
           >
             <List className="h-4 w-4" />
           </Button>
+          <Button
+            variant={viewMode === "tier" ? "secondary" : "ghost"}
+            size="icon"
+            onClick={() => setViewMode("tier")}
+            aria-label="Group by tier"
+          >
+            <Layers className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
@@ -289,6 +338,21 @@ export default function PlatformListPage() {
             <p className="text-muted-foreground">No platforms found</p>
           </CardContent>
         </Card>
+      ) : viewMode === "tier" ? (
+        <TierGroupView
+          platforms={filtered}
+          tiers={tiers || []}
+          isAdmin={isAdmin}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onDelete={handleDelete}
+          onChangeTier={(platformId, tierId) => changeTierMutation.mutate({ platformId, tierId })}
+          dragPlatformId={dragPlatformId}
+          getTierName={getTierName}
+          formatCost={formatCost}
+          formatDate={formatDate}
+        />
       ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(platform => (
@@ -413,6 +477,146 @@ export default function PlatformListPage() {
           </Table>
         </div>
       )}
+    </div>
+  );
+}
+
+function TierGroupView({
+  platforms,
+  tiers,
+  isAdmin,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDelete,
+  onChangeTier,
+  dragPlatformId,
+  getTierName,
+  formatCost,
+  formatDate,
+}: {
+  platforms: Platform[];
+  tiers: Tier[];
+  isAdmin: boolean;
+  onDragStart: (e: React.DragEvent, id: string) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent, tierId: string | null) => void;
+  onDelete: (e: React.MouseEvent, id: string, name: string) => void;
+  onChangeTier: (platformId: string, tierId: string | null) => void;
+  dragPlatformId: string | null;
+  getTierName: (tierId: string | null) => string | null;
+  formatCost: (cost: string | null) => string;
+  formatDate: (date: string | Date | null) => string;
+}) {
+  // Group platforms by tier
+  const tierGroups: { tier: Tier | null; platforms: Platform[] }[] = [];
+
+  // Add groups for each defined tier
+  for (const tier of tiers) {
+    tierGroups.push({
+      tier,
+      platforms: platforms.filter(p => p.tierId === tier.id),
+    });
+  }
+
+  // Add "Unassigned" group
+  const unassigned = platforms.filter(p => !p.tierId || !tiers.find(t => t.id === p.tierId));
+  tierGroups.push({ tier: null, platforms: unassigned });
+
+  return (
+    <div className="space-y-6">
+      {tierGroups.map(group => {
+        const tierId = group.tier?.id || null;
+        const tierLabel = group.tier?.name || "Unassigned";
+        const tierDesc = group.tier?.description;
+        const isDragOver = dragPlatformId !== null;
+
+        return (
+          <div
+            key={tierId || "unassigned"}
+            onDragOver={onDragOver}
+            onDrop={e => onDrop(e, tierId)}
+            className={`rounded-lg border-2 transition-colors ${
+              isDragOver ? "border-dashed border-primary/50 bg-primary/5" : "border-transparent"
+            }`}
+          >
+            <div className="flex items-center gap-3 px-4 py-3 bg-muted/50 rounded-t-lg">
+              <Layers className="h-4 w-4 text-muted-foreground" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-sm">{tierLabel}</h3>
+                {tierDesc && <p className="text-xs text-muted-foreground">{tierDesc}</p>}
+              </div>
+              <Badge variant="secondary">{group.platforms.length}</Badge>
+            </div>
+
+            {group.platforms.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {isAdmin && dragPlatformId ? "Drop here to assign this tier" : "No platforms in this tier"}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-3">
+                {group.platforms.map(platform => (
+                  <Link key={platform.id} href={`/platforms/${platform.id}`}>
+                    <Card
+                      className={`hover-elevate active-elevate-2 h-full ${
+                        isAdmin ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+                      } ${dragPlatformId === platform.id ? "opacity-50" : ""}`}
+                      draggable={isAdmin}
+                      onDragStart={e => { e.stopPropagation(); onDragStart(e, platform.id); }}
+                    >
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-semibold text-sm truncate">{platform.toolName}</h4>
+                              <StatusBadge status={platform.status} />
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{platform.primaryGoal || "No description"}</p>
+                          </div>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0"
+                              onClick={(e) => onDelete(e, platform.id, platform.toolName)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                          {platform.department && <span>{platform.department}</span>}
+                          <span>{formatCost(platform.annualCost)}</span>
+                        </div>
+                        {isAdmin && (
+                          <div className="mt-2" onClick={e => e.preventDefault()}>
+                            <Select
+                              value={platform.tierId || "unassigned"}
+                              onValueChange={v => {
+                                onChangeTier(platform.id, v === "unassigned" ? null : v);
+                              }}
+                            >
+                              <SelectTrigger className="h-7 text-xs">
+                                <SelectValue placeholder="Assign tier..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {tiers.map(t => (
+                                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
