@@ -15,17 +15,46 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers, Settings2 } from "lucide-react";
 import type { Platform, Tier } from "@shared/schema";
 
 type SortField = "toolName" | "status" | "department" | "tier" | "impactLevel" | "annualCost" | "lastReviewedAt";
 
+type ColumnDef = {
+  field: SortField;
+  label: string;
+  align?: "right";
+  defaultVisible: boolean;
+};
+
+const ALL_COLUMNS: ColumnDef[] = [
+  { field: "toolName", label: "Name", defaultVisible: true },
+  { field: "status", label: "Status", defaultVisible: true },
+  { field: "department", label: "Department", defaultVisible: true },
+  { field: "tier", label: "Tier", defaultVisible: true },
+  { field: "impactLevel", label: "Impact", defaultVisible: true },
+  { field: "annualCost", label: "Annual Cost", align: "right", defaultVisible: true },
+  { field: "lastReviewedAt", label: "Last Reviewed", defaultVisible: true },
+];
+
+const STATUS_OPTIONS = [
+  { value: "on_review", label: "On Review" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+  { value: "retired", label: "Retired" },
+];
+
 export default function PlatformListPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list" | "tier">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list" | "tier">("list");
   const [sortField, setSortField] = useState<SortField>("toolName");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [visibleColumns, setVisibleColumns] = useState<Set<SortField>>(
+    () => new Set(ALL_COLUMNS.filter(c => c.defaultVisible).map(c => c.field))
+  );
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -97,6 +126,20 @@ export default function PlatformListPage() {
     },
   });
 
+  const changeStatusMutation = useMutation({
+    mutationFn: async ({ platformId, status }: { platformId: string; status: string }) => {
+      const res = await apiRequest("PATCH", `/api/platforms/${platformId}`, { status });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Status Updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   // Drag state for tier view
   const [dragPlatformId, setDragPlatformId] = useState<string | null>(null);
 
@@ -132,9 +175,29 @@ export default function PlatformListPage() {
     }
   };
 
+  const handleStatusChange = (e: React.MouseEvent, platformId: string, newStatus: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    changeStatusMutation.mutate({ platformId, status: newStatus });
+  };
+
   const getTierName = (tierId: string | null) => {
     if (!tierId) return null;
     return tiers?.find(t => t.id === tierId)?.name || null;
+  };
+
+  const toggleColumn = (field: SortField) => {
+    // Don't allow hiding the Name column
+    if (field === "toolName") return;
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(field)) {
+        next.delete(field);
+      } else {
+        next.add(field);
+      }
+      return next;
+    });
   };
 
   const filtered = platforms?.filter(p => {
@@ -204,6 +267,54 @@ export default function PlatformListPage() {
     return items;
   }, [filtered, sortField, sortDirection, viewMode, tiers]);
 
+  const activeColumns = ALL_COLUMNS.filter(c => visibleColumns.has(c.field));
+
+  const renderCellContent = (platform: Platform, field: SortField) => {
+    switch (field) {
+      case "toolName":
+        return <span className="font-medium">{platform.toolName}</span>;
+      case "status":
+        if (isAdmin) {
+          return (
+            <div onClick={e => e.stopPropagation()}>
+              <Select
+                value={platform.status}
+                onValueChange={v => changeStatusMutation.mutate({ platformId: platform.id, status: v })}
+              >
+                <SelectTrigger className="h-7 w-[130px] text-xs border-none shadow-none px-0 hover:bg-muted/50">
+                  <StatusBadge status={platform.status} />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        }
+        return <StatusBadge status={platform.status} />;
+      case "department":
+        return <span className="text-muted-foreground">{platform.department || "\u2014"}</span>;
+      case "tier":
+        return getTierName(platform.tierId)
+          ? <Badge variant="outline">{getTierName(platform.tierId)}</Badge>
+          : <span className="text-muted-foreground">{"\u2014"}</span>;
+      case "impactLevel":
+        return platform.impactLevel
+          ? <ImpactBadge level={platform.impactLevel} />
+          : <span className="text-muted-foreground">{"\u2014"}</span>;
+      case "annualCost":
+        return formatCost(platform.annualCost);
+      case "lastReviewedAt":
+        return <span className="text-muted-foreground">
+          {platform.lastReviewedAt ? formatDate(platform.lastReviewedAt) : formatDate(platform.createdAt)}
+        </span>;
+      default:
+        return null;
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-6 max-w-6xl mx-auto space-y-4">
@@ -262,10 +373,9 @@ export default function PlatformListPage() {
                     <Select value={newStatus} onValueChange={setNewStatus}>
                       <SelectTrigger data-testid="select-platform-status-new"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="on_review">On Review</SelectItem>
-                        <SelectItem value="approved">Approved</SelectItem>
-                        <SelectItem value="rejected">Rejected</SelectItem>
-                        <SelectItem value="retired">Retired</SelectItem>
+                        {STATUS_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -297,13 +407,37 @@ export default function PlatformListPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="on_review">On Review</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="retired">Retired</SelectItem>
+            {STATUS_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-1 ml-auto">
+          {viewMode === "list" && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Toggle columns">
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-2" align="end">
+                <p className="text-xs font-medium text-muted-foreground px-2 py-1">Toggle Columns</p>
+                {ALL_COLUMNS.map(col => (
+                  <label
+                    key={col.field}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-muted cursor-pointer text-sm"
+                  >
+                    <Checkbox
+                      checked={visibleColumns.has(col.field)}
+                      disabled={col.field === "toolName"}
+                      onCheckedChange={() => toggleColumn(col.field)}
+                    />
+                    {col.label}
+                  </label>
+                ))}
+              </PopoverContent>
+            </Popover>
+          )}
           <Button
             variant={viewMode === "grid" ? "secondary" : "ghost"}
             size="icon"
@@ -347,6 +481,7 @@ export default function PlatformListPage() {
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onDelete={handleDelete}
+          onStatusChange={handleStatusChange}
           onChangeTier={(platformId, tierId) => changeTierMutation.mutate({ platformId, tierId })}
           dragPlatformId={dragPlatformId}
           getTierName={getTierName}
@@ -363,7 +498,25 @@ export default function PlatformListPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold truncate" data-testid={`text-platform-${platform.id}`}>{platform.toolName}</h3>
-                        <StatusBadge status={platform.status} />
+                        {isAdmin ? (
+                          <div onClick={e => e.preventDefault()}>
+                            <Select
+                              value={platform.status}
+                              onValueChange={v => changeStatusMutation.mutate({ platformId: platform.id, status: v })}
+                            >
+                              <SelectTrigger className="h-6 border-none shadow-none px-0 hover:bg-muted/50 w-auto">
+                                <StatusBadge status={platform.status} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {STATUS_OPTIONS.map(opt => (
+                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : (
+                          <StatusBadge status={platform.status} />
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{platform.primaryGoal || "No description"}</p>
                     </div>
@@ -411,21 +564,13 @@ export default function PlatformListPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                {([
-                  { field: "toolName" as SortField, label: "Name" },
-                  { field: "status" as SortField, label: "Status" },
-                  { field: "department" as SortField, label: "Department" },
-                  { field: "tier" as SortField, label: "Tier" },
-                  { field: "impactLevel" as SortField, label: "Impact" },
-                  { field: "annualCost" as SortField, label: "Annual Cost", align: "right" as const },
-                  { field: "lastReviewedAt" as SortField, label: "Last Reviewed" },
-                ]).map(col => (
+                {activeColumns.map(col => (
                   <TableHead
                     key={col.field}
-                    className={`cursor-pointer select-none ${"align" in col && col.align === "right" ? "text-right" : ""}`}
+                    className={`cursor-pointer select-none ${col.align === "right" ? "text-right" : ""}`}
                     onClick={() => handleSort(col.field)}
                   >
-                    <div className={`flex items-center ${"align" in col && col.align === "right" ? "justify-end" : ""}`}>
+                    <div className={`flex items-center ${col.align === "right" ? "justify-end" : ""}`}>
                       {col.label}
                       <SortIcon field={col.field} />
                     </div>
@@ -441,23 +586,11 @@ export default function PlatformListPage() {
                   className="cursor-pointer"
                   onClick={() => setLocation(`/platforms/${platform.id}`)}
                 >
-                  <TableCell className="font-medium">{platform.toolName}</TableCell>
-                  <TableCell><StatusBadge status={platform.status} /></TableCell>
-                  <TableCell className="text-muted-foreground">{platform.department || "\u2014"}</TableCell>
-                  <TableCell>
-                    {getTierName(platform.tierId)
-                      ? <Badge variant="outline">{getTierName(platform.tierId)}</Badge>
-                      : <span className="text-muted-foreground">{"\u2014"}</span>}
-                  </TableCell>
-                  <TableCell>
-                    {platform.impactLevel
-                      ? <ImpactBadge level={platform.impactLevel} />
-                      : <span className="text-muted-foreground">{"\u2014"}</span>}
-                  </TableCell>
-                  <TableCell className="text-right">{formatCost(platform.annualCost)}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {platform.lastReviewedAt ? formatDate(platform.lastReviewedAt) : formatDate(platform.createdAt)}
-                  </TableCell>
+                  {activeColumns.map(col => (
+                    <TableCell key={col.field} className={col.align === "right" ? "text-right" : ""}>
+                      {renderCellContent(platform, col.field)}
+                    </TableCell>
+                  ))}
                   {isAdmin && (
                     <TableCell>
                       <Button
@@ -489,6 +622,7 @@ function TierGroupView({
   onDragOver,
   onDrop,
   onDelete,
+  onStatusChange,
   onChangeTier,
   dragPlatformId,
   getTierName,
@@ -502,6 +636,7 @@ function TierGroupView({
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, tierId: string | null) => void;
   onDelete: (e: React.MouseEvent, id: string, name: string) => void;
+  onStatusChange: (e: React.MouseEvent, id: string, status: string) => void;
   onChangeTier: (platformId: string, tierId: string | null) => void;
   dragPlatformId: string | null;
   getTierName: (tierId: string | null) => string | null;
@@ -569,7 +704,28 @@ function TierGroupView({
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <h4 className="font-semibold text-sm truncate">{platform.toolName}</h4>
-                              <StatusBadge status={platform.status} />
+                              {isAdmin ? (
+                                <div onClick={e => e.preventDefault()}>
+                                  <Select
+                                    value={platform.status}
+                                    onValueChange={v => {
+                                      const fakeEvent = { preventDefault: () => {}, stopPropagation: () => {} } as React.MouseEvent;
+                                      onStatusChange(fakeEvent, platform.id, v);
+                                    }}
+                                  >
+                                    <SelectTrigger className="h-5 border-none shadow-none px-0 hover:bg-muted/50 w-auto">
+                                      <StatusBadge status={platform.status} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {STATUS_OPTIONS.map(opt => (
+                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              ) : (
+                                <StatusBadge status={platform.status} />
+                              )}
                             </div>
                             <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{platform.primaryGoal || "No description"}</p>
                           </div>
