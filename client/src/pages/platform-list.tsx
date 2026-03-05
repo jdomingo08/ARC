@@ -149,7 +149,7 @@ export default function PlatformListPage() {
   };
 
   const formatCost = (cost: string | null) => {
-    if (!cost || cost === "0") return "Free";
+    if (!cost || Number(cost) === 0) return "Free";
     return `$${Number(cost).toLocaleString()}/yr`;
   };
 

@@ -127,6 +127,7 @@ export default function PlatformDetailPage() {
       toast({ title: "Platform Updated" });
       setEditingDetails(false);
       queryClient.invalidateQueries({ queryKey: ["/api/platforms", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms"], exact: true });
     },
     onError: (err: any) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -221,7 +222,7 @@ export default function PlatformDetailPage() {
       department: detailValues.department || null,
       estimatedUsers: detailValues.estimatedUsers || null,
       impactLevel: detailValues.impactLevel || null,
-      annualCost: detailValues.annualCost || null,
+      annualCost: detailValues.annualCost !== "" ? detailValues.annualCost : null,
       dataTraining: detailValues.dataTraining || null,
       loginMethod: detailValues.loginMethod || null,
       primaryGoal: detailValues.primaryGoal || null,
