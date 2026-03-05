@@ -3,7 +3,7 @@ import { eq, desc, and, ilike } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
-  agentRunLogs, auditLogs, requestComments, requestAttachments,
+  agentRunLogs, auditLogs, scanSchedules, requestComments, requestAttachments,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
