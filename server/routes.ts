@@ -8,6 +8,7 @@ import { storage } from "./storage";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
 import { getLogoUrl } from "./logo-resolver";
+import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
 import type { User } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -851,6 +852,81 @@ export async function registerRoutes(
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
+  });
+
+  // --- Tool Insights AI Feed ---
+  app.post("/api/tool-insights", requireAuth, async (req, res) => {
+    try {
+      if (!llmProvider) {
+        return res.status(503).json({
+          message: "AI provider not configured. Set OPENAI_API_KEY environment variable to enable tool insights.",
+        });
+      }
+
+      const { toolName } = req.body;
+      if (!toolName || typeof toolName !== "string" || toolName.trim().length < 2) {
+        return res.status(400).json({ message: "A valid tool name is required (at least 2 characters)" });
+      }
+
+      const result = await llmProvider.complete({
+        systemPrompt: TOOL_INSIGHTS_SYSTEM_PROMPT,
+        userPrompt: buildToolInsightsPrompt(toolName.trim()),
+        enableWebSearch: true,
+        responseFormat: "json",
+        temperature: 0.4,
+      });
+
+      let parsed;
+      try {
+        parsed = JSON.parse(result.content);
+      } catch {
+        return res.status(500).json({ message: "Failed to parse AI response" });
+      }
+
+      res.json({ ...parsed, citations: result.citations });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Agent Prompts Registry ---
+  app.get("/api/agent-prompts", requireAuth, async (_req, res) => {
+    const { RISK_ANALYSIS_SYSTEM_PROMPT, buildPlatformPrompt } = await import("./risk-agent/prompts");
+
+    const samplePlatform = {
+      toolName: "ExampleTool",
+      primaryGoal: "Example goal",
+      department: "Engineering",
+      dataInput: ["public"],
+      loginMethod: "SSO",
+      dataTraining: "no",
+      costStructure: "per_seat",
+    };
+
+    res.json([
+      {
+        id: "risk-scanner",
+        name: "Risk Scanner Agent",
+        description: "Analyzes vendor/platform security posture by searching for recent security events, CVEs, breaches, and regulatory actions.",
+        category: "Security & Compliance",
+        systemPrompt: RISK_ANALYSIS_SYSTEM_PROMPT,
+        userPromptTemplate: buildPlatformPrompt(samplePlatform as any),
+        userPromptDescription: "Dynamically built from platform details (tool name, department, data types, login method, etc.)",
+        model: process.env.OPENAI_MODEL || "gpt-4o",
+        features: ["Web Search", "JSON Response", "Risk Classification"],
+      },
+      {
+        id: "tool-insights",
+        name: "Tool Insights Agent",
+        description: "Researches AI/software tools to provide comprehensive analysis including pricing, integrations, competitive landscape, and enterprise fit for Entravision.",
+        category: "Research & Analysis",
+        systemPrompt: TOOL_INSIGHTS_SYSTEM_PROMPT,
+        userPromptTemplate: buildToolInsightsPrompt("ExampleTool"),
+        userPromptDescription: "Built from the tool name entered in the New Request form. Triggers web search for current pricing and feature data.",
+        model: process.env.OPENAI_MODEL || "gpt-4o",
+        features: ["Web Search", "JSON Response", "Cost Analysis", "Competitive Analysis"],
+      },
+    ]);
   });
 
   app.get("/api/stats", requireAuth, async (_req, res) => {

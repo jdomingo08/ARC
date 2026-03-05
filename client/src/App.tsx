@@ -18,6 +18,7 @@ import PlatformListPage from "@/pages/platform-list";
 import PlatformDetailPage from "@/pages/platform-detail";
 import AdminPage from "@/pages/admin";
 import RiskAgentPage from "@/pages/risk-agent";
+import AgentModulesPage from "@/pages/agent-modules";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {
@@ -59,6 +60,7 @@ function AppContent() {
               <Route path="/platforms" component={PlatformListPage} />
               <Route path="/admin" component={AdminPage} />
               <Route path="/risk" component={RiskAgentPage} />
+              <Route path="/agents" component={AgentModulesPage} />
               <Route component={NotFound} />
             </Switch>
           </main>

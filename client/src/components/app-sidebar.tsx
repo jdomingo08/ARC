@@ -25,6 +25,7 @@ import {
   ShieldAlert,
   LogOut,
   Shield,
+  Bot,
 } from "lucide-react";
 
 export function AppSidebar() {
@@ -42,6 +43,7 @@ export function AppSidebar() {
   const adminItems = [
     { title: "Admin", url: "/admin", icon: Settings, roles: ["admin", "chair"] },
     { title: "Risk Agent", url: "/risk", icon: ShieldAlert, roles: ["reviewer", "chair", "admin"] },
+    { title: "Agent Modules", url: "/agents", icon: Bot, roles: ["reviewer", "chair", "admin"] },
   ];
 
   const filteredMain = mainItems.filter(item => user && item.roles.includes(user.role));
