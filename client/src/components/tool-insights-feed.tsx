@@ -73,7 +73,8 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   const [insights, setInsights] = useState<ToolInsights | null>(null);
   const [lastSearched, setLastSearched] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<NodeJS.Timeout>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const lastSearchedRef = useRef("");
 
   const mutation = useMutation({
     mutationFn: async (name: string) => {
@@ -89,9 +90,10 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     const trimmed = toolName.trim();
-    if (trimmed.length < 3 || trimmed === lastSearched) return;
+    if (trimmed.length < 3 || trimmed === lastSearchedRef.current) return;
 
     debounceRef.current = setTimeout(() => {
+      lastSearchedRef.current = trimmed;
       setLastSearched(trimmed);
       mutation.mutate(trimmed);
     }, 1500);

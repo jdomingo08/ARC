@@ -118,10 +118,10 @@ export default function NewRequestPage() {
         <p className="text-muted-foreground mt-1">Submit a request for AI tool evaluation and approval</p>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col lg:flex-row gap-6">
         {/* Left Panel - AI Insights Feed */}
-        <div className="hidden lg:flex w-[340px] shrink-0">
-          <div className="w-full border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col sticky top-4" style={{ maxHeight: "calc(100vh - 180px)" }}>
+        <div className="w-full lg:w-[340px] shrink-0">
+          <div className="w-full border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col lg:sticky lg:top-4 h-[400px] lg:h-auto" style={{ maxHeight: "calc(100vh - 180px)" }}>
             <ToolInsightsFeed toolName={formData.toolName} />
           </div>
         </div>
