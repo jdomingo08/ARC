@@ -83,7 +83,7 @@ export async function registerRoutes(
   await storage.seedData();
 
   // Initialize AI/LLM provider for risk scanning
-  const llmProvider = createLLMProvider();
+  const llmProvider = await createLLMProvider();
 
   app.post("/api/auth/login", async (req, res) => {
     try {

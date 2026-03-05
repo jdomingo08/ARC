@@ -24,7 +24,7 @@ export interface LLMProvider {
   complete(options: LLMCompleteOptions): Promise<LLMResponse>;
 }
 
-export function createLLMProvider(): LLMProvider | null {
+export async function createLLMProvider(): Promise<LLMProvider | null> {
   const provider = process.env.AI_PROVIDER || "openai";
 
   switch (provider) {
@@ -33,8 +33,7 @@ export function createLLMProvider(): LLMProvider | null {
         console.warn("[AI] OPENAI_API_KEY not set — risk agent will be unavailable");
         return null;
       }
-      // Dynamic import to avoid loading SDK when not configured
-      const { OpenAIProvider } = require("./openai");
+      const { OpenAIProvider } = await import("./openai");
       return new OpenAIProvider();
     }
     default:
