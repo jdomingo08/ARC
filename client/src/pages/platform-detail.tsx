@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link, useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -5,9 +6,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge, ImpactBadge, RiskBadge, ConfidenceBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -24,6 +27,9 @@ import {
   AlertTriangle,
   ExternalLink,
   Trash2,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
 import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition } from "@shared/schema";
 
@@ -33,6 +39,9 @@ export default function PlatformDetailPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const id = params?.id;
+
+  const [editingAttrs, setEditingAttrs] = useState(false);
+  const [attrValues, setAttrValues] = useState<Record<string, any>>({});
 
   const { data: platform, isLoading } = useQuery<Platform>({
     queryKey: ["/api/platforms", id],
@@ -78,6 +87,21 @@ export default function PlatformDetailPage() {
     },
   });
 
+  const updateAttrsMutation = useMutation({
+    mutationFn: async (dynamicAttributes: Record<string, any>) => {
+      const res = await apiRequest("PATCH", `/api/platforms/${id}`, { dynamicAttributes });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Attributes Updated" });
+      setEditingAttrs(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   const formatDate = (date: string | Date | null) => {
     if (!date) return "N/A";
     return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -108,6 +132,97 @@ export default function PlatformDetailPage() {
 
   const tierName = tiers?.find(t => t.id === platform.tierId)?.name;
   const dynAttrs = (platform.dynamicAttributes || {}) as Record<string, any>;
+
+  const startEditingAttrs = () => {
+    setAttrValues({ ...dynAttrs });
+    setEditingAttrs(true);
+  };
+
+  const saveAttrs = () => {
+    updateAttrsMutation.mutate(attrValues);
+  };
+
+  const renderAttrInput = (attr: PlatformAttributeDefinition) => {
+    const value = attrValues[attr.name] ?? attr.defaultValue ?? "";
+    const options = (attr.options || []) as string[];
+
+    switch (attr.dataType) {
+      case "boolean":
+        return (
+          <div className="flex items-center gap-2 mt-1">
+            <Checkbox
+              checked={value === true || value === "true"}
+              onCheckedChange={checked => setAttrValues(v => ({ ...v, [attr.name]: checked }))}
+            />
+            <span className="text-sm">{value === true || value === "true" ? "Yes" : "No"}</span>
+          </div>
+        );
+      case "dropdown":
+        return (
+          <Select value={value || ""} onValueChange={v => setAttrValues(vals => ({ ...vals, [attr.name]: v }))}>
+            <SelectTrigger className="h-8 mt-1"><SelectValue placeholder="Select..." /></SelectTrigger>
+            <SelectContent>
+              {options.map(opt => (
+                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        );
+      case "multi_select": {
+        const selected = Array.isArray(value) ? value : value ? String(value).split(",").map((s: string) => s.trim()) : [];
+        return (
+          <div className="flex flex-wrap gap-2 mt-1">
+            {options.map(opt => (
+              <label key={opt} className="flex items-center gap-1 text-sm">
+                <Checkbox
+                  checked={selected.includes(opt)}
+                  onCheckedChange={checked => {
+                    const next = checked ? [...selected, opt] : selected.filter((s: string) => s !== opt);
+                    setAttrValues(v => ({ ...v, [attr.name]: next }));
+                  }}
+                />
+                {opt}
+              </label>
+            ))}
+          </div>
+        );
+      }
+      case "number":
+        return (
+          <Input
+            type="number"
+            className="h-8 mt-1"
+            value={value}
+            onChange={e => setAttrValues(v => ({ ...v, [attr.name]: e.target.value }))}
+          />
+        );
+      case "date":
+        return (
+          <Input
+            type="date"
+            className="h-8 mt-1"
+            value={value}
+            onChange={e => setAttrValues(v => ({ ...v, [attr.name]: e.target.value }))}
+          />
+        );
+      default: // text
+        return (
+          <Input
+            type="text"
+            className="h-8 mt-1"
+            value={value}
+            onChange={e => setAttrValues(v => ({ ...v, [attr.name]: e.target.value }))}
+          />
+        );
+    }
+  };
+
+  const formatAttrValue = (attr: PlatformAttributeDefinition, value: any) => {
+    if (value === undefined || value === null || value === "") return attr.defaultValue || "Not set";
+    if (attr.dataType === "boolean") return value === true || value === "true" ? "Yes" : "No";
+    if (attr.dataType === "multi_select" && Array.isArray(value)) return value.join(", ");
+    return String(value);
+  };
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -156,6 +271,48 @@ export default function PlatformDetailPage() {
         )}
       </div>
 
+      {/* Custom Attributes Card — prominent position */}
+      {attrDefs && attrDefs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Custom Attributes</CardTitle>
+              {isAdmin && !editingAttrs && (
+                <Button variant="ghost" size="sm" onClick={startEditingAttrs}>
+                  <Pencil className="h-4 w-4 mr-1" /> Edit
+                </Button>
+              )}
+              {editingAttrs && (
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={saveAttrs} disabled={updateAttrsMutation.isPending}>
+                    <Save className="h-4 w-4 mr-1" /> {updateAttrsMutation.isPending ? "Saving..." : "Save"}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingAttrs(false)}>
+                    <X className="h-4 w-4 mr-1" /> Cancel
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {attrDefs.map(attr => (
+                <div key={attr.id}>
+                  <p className="text-xs text-muted-foreground">{attr.name}</p>
+                  {editingAttrs ? (
+                    renderAttrInput(attr)
+                  ) : (
+                    <p className="text-sm font-medium mt-0.5">
+                      {formatAttrValue(attr, dynAttrs[attr.name])}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Card>
@@ -180,23 +337,6 @@ export default function PlatformDetailPage() {
                   <div>
                     <p className="text-sm font-medium mb-1">Decision Summary</p>
                     <p className="text-sm text-muted-foreground">{platform.decisionSummary}</p>
-                  </div>
-                </>
-              )}
-
-              {attrDefs && attrDefs.length > 0 && (
-                <>
-                  <Separator />
-                  <div>
-                    <p className="text-sm font-medium mb-2">Custom Attributes</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {attrDefs.map(attr => (
-                        <div key={attr.id} className="text-sm">
-                          <p className="text-muted-foreground">{attr.name}</p>
-                          <p className="font-medium">{dynAttrs[attr.name] || attr.defaultValue || "Not set"}</p>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </>
               )}
