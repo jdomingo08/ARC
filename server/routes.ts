@@ -1,10 +1,24 @@
 import type { Express, Request as ExpReq, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { storage } from "./storage";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
 import type { User } from "@shared/schema";
+
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
 
 declare module "express-session" {
   interface SessionData {
@@ -77,6 +91,19 @@ export async function registerRoutes(
     try {
       const allUsers = await storage.getAllUsers();
       res.json(allUsers);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/users", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const { name, email, department, role } = req.body;
+      if (!name || !email) return res.status(400).json({ message: "Name and email are required" });
+      const existing = await storage.getUserByEmail(email);
+      if (existing) return res.status(409).json({ message: "A user with that email already exists" });
+      const user = await storage.createUser({ name, email, department: department || null, role: role || "requester" });
+      res.json(user);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -169,7 +196,13 @@ export async function registerRoutes(
       const before = await storage.getRequest(req.params.id);
       if (!before) return res.status(404).json({ message: "Request not found" });
 
-      if (user.role === "requester" && before.requesterId !== user.id) {
+      // Lock enforcement: if locked, only admin can edit
+      if (before.locked && user.role !== "admin") {
+        return res.status(403).json({ message: "This request is locked. Only an admin can edit it." });
+      }
+
+      // Non-admin users can only edit their own requests
+      if (user.role !== "admin" && user.role !== "chair" && before.requesterId !== user.id) {
         return res.status(403).json({ message: "Access denied" });
       }
 
@@ -186,6 +219,31 @@ export async function registerRoutes(
           actorId: user.id,
         });
       }
+
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Lock / Unlock request (admin only)
+  app.patch("/api/requests/:id/lock", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const locked = !!req.body.locked;
+      const updated = await storage.updateRequest(req.params.id, { locked });
+
+      await storage.createAuditLog({
+        entityType: "request",
+        entityId: req.params.id,
+        action: locked ? "locked" : "unlocked",
+        before: { locked: request.locked },
+        after: { locked },
+        actorId: user.id,
+      });
 
       res.json(updated);
     } catch (e: any) {
@@ -257,6 +315,7 @@ export async function registerRoutes(
         await storage.updateRequestStatus(req.params.id, "waiting_on_requester");
       } else if (decision === "fail") {
         await storage.updateRequestStatus(req.params.id, "rejected");
+        await storage.updateRequest(req.params.id, { locked: true });
         if (request.platformId) {
           await storage.updatePlatform(request.platformId, { status: "rejected", decisionSummary: `Rejected by ${reviewerRole}: ${rationale}` });
         }
@@ -270,6 +329,7 @@ export async function registerRoutes(
 
         if (securityPass && techPass && chairPasses.length >= 2) {
           await storage.updateRequestStatus(req.params.id, "approved");
+          await storage.updateRequest(req.params.id, { locked: true });
           if (request.platformId) {
             const allConditions = activeReviews.filter(r => r.conditions).map(r => r.conditions).join("; ");
             await storage.updatePlatform(request.platformId, {
@@ -283,6 +343,58 @@ export async function registerRoutes(
       }
 
       res.json(reviewDecision);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/admin/platforms", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const data = req.body;
+      if (!data.toolName) return res.status(400).json({ message: "Tool name is required" });
+
+      const existing = await storage.getPlatformByToolName(data.toolName);
+      if (existing) return res.status(409).json({ message: "A platform with that name already exists" });
+
+      data.ownerId = user.id;
+      if (!data.status) data.status = "on_review";
+      const platform = await storage.createPlatform(data);
+
+      await storage.createAuditLog({
+        entityType: "platform",
+        entityId: platform.id,
+        action: "created",
+        before: null,
+        after: platform,
+        actorId: user.id,
+      });
+
+      res.json(platform);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/platforms/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const platform = await storage.getPlatform(req.params.id as string);
+      if (!platform) return res.status(404).json({ message: "Platform not found" });
+
+      await storage.createAuditLog({
+        entityType: "platform",
+        entityId: req.params.id as string,
+        action: "deleted",
+        before: platform,
+        after: null,
+        actorId: user.id,
+      });
+
+      const deleted = await storage.deletePlatform(req.params.id as string);
+      if (!deleted) return res.status(404).json({ message: "Platform not found" });
+
+      res.json({ message: "Platform deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -368,6 +480,16 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/attributes/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteAttributeDefinition(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Attribute not found" });
+      res.json({ message: "Attribute deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/admin/tiers", requireAuth, async (_req, res) => {
     try {
       const allTiers = await storage.getAllTiers();
@@ -383,6 +505,26 @@ export async function registerRoutes(
       if (!name) return res.status(400).json({ message: "Name is required" });
       const tier = await storage.createTier(req.body);
       res.json(tier);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/tiers/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const updated = await storage.updateTier(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Tier not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/tiers/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteTier(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Tier not found" });
+      res.json({ message: "Tier deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -409,8 +551,17 @@ export async function registerRoutes(
     }
   });
 
-  // Initialize LLM provider (null if API key not configured)
-  const llmProvider = createLLMProvider();
+  app.delete("/api/admin/users/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      if (user.id === req.params.id) return res.status(400).json({ message: "Cannot delete yourself" });
+      const deleted = await storage.deleteUser(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "User not found" });
+      res.json({ message: "User deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
 
   app.post("/api/risk/run", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
     try {
@@ -549,6 +700,126 @@ export async function registerRoutes(
     try {
       const logs = await storage.getAuditLogsByEntity(req.params.entityType, req.params.entityId);
       res.json(logs);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Comments ---
+  app.get("/api/requests/:id/comments", requireAuth, async (req, res) => {
+    try {
+      const comments = await storage.getCommentsByRequest(req.params.id);
+      res.json(comments);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/requests/:id/comments", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const { body } = req.body;
+      if (!body || !body.trim()) return res.status(400).json({ message: "Comment body is required" });
+
+      const comment = await storage.createRequestComment({
+        requestId: req.params.id,
+        authorId: user.id,
+        authorName: user.name,
+        body: body.trim(),
+      });
+      res.json(comment);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/requests/:id/comments/:commentId", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const comments = await storage.getCommentsByRequest(req.params.id);
+      const comment = comments.find(c => c.id === req.params.commentId);
+      if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+      if (comment.authorId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "You can only delete your own comments" });
+      }
+
+      await storage.deleteRequestComment(req.params.commentId);
+      res.json({ message: "Comment deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Attachments ---
+  app.get("/api/requests/:id/attachments", requireAuth, async (req, res) => {
+    try {
+      const attachments = await storage.getAttachmentsByRequest(req.params.id);
+      res.json(attachments);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/requests/:id/attachments", requireAuth, upload.single("file"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const file = req.file;
+      if (!file) return res.status(400).json({ message: "No file uploaded" });
+
+      const attachment = await storage.createRequestAttachment({
+        requestId: req.params.id,
+        uploadedBy: user.id,
+        uploaderName: user.name,
+        fileName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype || null,
+        storagePath: file.path,
+      });
+      res.json(attachment);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/attachments/:id/download", requireAuth, async (req, res) => {
+    try {
+      const attachment = await storage.getAttachment(req.params.id);
+      if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+
+      if (!fs.existsSync(attachment.storagePath)) {
+        return res.status(404).json({ message: "File not found on disk" });
+      }
+
+      res.download(attachment.storagePath, attachment.fileName);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/attachments/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const attachment = await storage.getAttachment(req.params.id);
+      if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+
+      if (attachment.uploadedBy !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "You can only delete your own uploads" });
+      }
+
+      // Remove file from disk
+      if (fs.existsSync(attachment.storagePath)) {
+        fs.unlinkSync(attachment.storagePath);
+      }
+
+      await storage.deleteRequestAttachment(req.params.id);
+      res.json({ message: "Attachment deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

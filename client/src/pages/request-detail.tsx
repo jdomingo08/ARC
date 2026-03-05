@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -5,14 +6,17 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, ImpactBadge, DecisionBadge, RoleBadge } from "@/components/status-badge";
 import { ReviewPanel } from "@/components/review-panel";
 import {
   ArrowLeft,
   Calendar,
-  User,
+  User as UserIcon,
   Building2,
   Target,
   Users,
@@ -24,14 +28,30 @@ import {
   Key,
   Database,
   CheckCircle2,
+  ChevronDown,
+  Pencil,
+  Lock,
+  Unlock,
+  MessageSquare,
+  Paperclip,
+  Upload,
+  Download,
+  Trash2,
+  X,
+  Save,
 } from "lucide-react";
-import type { Request, ReviewDecision, AuditLog } from "@shared/schema";
+import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment } from "@shared/schema";
 
 export default function RequestDetailPage() {
   const [, params] = useRoute("/requests/:id");
   const { user } = useAuth();
   const { toast } = useToast();
   const id = params?.id;
+
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState<Partial<Request>>({});
+  const [commentText, setCommentText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: request, isLoading } = useQuery<Request>({
     queryKey: ["/api/requests", id],
@@ -48,6 +68,16 @@ export default function RequestDetailPage() {
     enabled: !!id,
   });
 
+  const { data: comments } = useQuery<RequestComment[]>({
+    queryKey: ["/api/requests", id, "comments"],
+    enabled: !!id,
+  });
+
+  const { data: attachments } = useQuery<RequestAttachment[]>({
+    queryKey: ["/api/requests", id, "attachments"],
+    enabled: !!id,
+  });
+
   const resubmitMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("PATCH", `/api/requests/${id}`, { status: "pending_reviews" });
@@ -60,11 +90,94 @@ export default function RequestDetailPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async (data: Partial<Request>) => {
+      const res = await apiRequest("PATCH", `/api/requests/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Request Updated" });
+      setEditing(false);
+      setEditData({});
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const lockMutation = useMutation({
+    mutationFn: async (locked: boolean) => {
+      const res = await apiRequest("PATCH", `/api/requests/${id}/lock`, { locked });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({ title: data.locked ? "Request Locked" : "Request Unlocked" });
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+    },
+  });
+
+  const addCommentMutation = useMutation({
+    mutationFn: async (body: string) => {
+      const res = await apiRequest("POST", `/api/requests/${id}/comments`, { body });
+      return res.json();
+    },
+    onSuccess: () => {
+      setCommentText("");
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id, "comments"] });
+    },
+  });
+
+  const deleteCommentMutation = useMutation({
+    mutationFn: async (commentId: string) => {
+      await apiRequest("DELETE", `/api/requests/${id}/comments/${commentId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id, "comments"] });
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/requests/${id}/attachments`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "File Uploaded" });
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id, "attachments"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Upload Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: async (attachmentId: string) => {
+      await apiRequest("DELETE", `/api/attachments/${attachmentId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id, "attachments"] });
+    },
+  });
+
   const formatDate = (date: string | Date) =>
     new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
   const formatArray = (arr: string[] | null) =>
     arr?.map(s => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())).join(", ") || "N/A";
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   if (isLoading) {
     return (
@@ -91,8 +204,37 @@ export default function RequestDetailPage() {
   const techReview = activeReviews.find(r => r.reviewerRole === "technical_financial");
   const strategicReview = activeReviews.find(r => r.reviewerRole === "strategic");
   const chairReviews = activeReviews.filter(r => r.reviewerRole === "chair");
-
   const canChairApprove = securityReview?.decision === "pass" && techReview?.decision === "pass";
+
+  const isAdmin = user?.role === "admin";
+  const isOwner = user?.id === request.requesterId;
+  const canEdit = !request.locked ? (isOwner || isAdmin) : isAdmin;
+
+  const startEditing = () => {
+    setEditData({
+      primaryGoal: request.primaryGoal,
+      estimatedUsers: request.estimatedUsers,
+      estimatedUsersCount: request.estimatedUsersCount,
+      workflowIntegration: request.workflowIntegration,
+      impactLevel: request.impactLevel,
+      costStructure: request.costStructure,
+      annualCost: request.annualCost,
+      dataTraining: request.dataTraining,
+      loginMethod: request.loginMethod,
+      alternativesText: request.alternativesText,
+    });
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    updateMutation.mutate(editData);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadMutation.mutate(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -109,15 +251,48 @@ export default function RequestDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold tracking-tight" data-testid="text-request-title">{request.toolName}</h1>
             <StatusBadge status={request.status} />
+            {request.locked && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                <Lock className="h-3 w-3" /> Locked
+              </span>
+            )}
           </div>
           <p className="text-muted-foreground mt-1 font-mono text-sm">{request.trackingId}</p>
         </div>
-        {request.status === "waiting_on_requester" && user?.id === request.requesterId && (
-          <Button onClick={() => resubmitMutation.mutate()} disabled={resubmitMutation.isPending} data-testid="button-resubmit">
-            <CheckCircle2 className="h-4 w-4 mr-1" />
-            {resubmitMutation.isPending ? "Resubmitting..." : "Resubmit for Review"}
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => lockMutation.mutate(!request.locked)}
+              disabled={lockMutation.isPending}
+            >
+              {request.locked ? <Unlock className="h-4 w-4 mr-1" /> : <Lock className="h-4 w-4 mr-1" />}
+              {request.locked ? "Unlock" : "Lock"}
+            </Button>
+          )}
+          {canEdit && !editing && (
+            <Button variant="outline" size="sm" onClick={startEditing}>
+              <Pencil className="h-4 w-4 mr-1" /> Edit
+            </Button>
+          )}
+          {editing && (
+            <>
+              <Button size="sm" onClick={saveEdit} disabled={updateMutation.isPending}>
+                <Save className="h-4 w-4 mr-1" /> {updateMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setEditData({}); }}>
+                <X className="h-4 w-4 mr-1" /> Cancel
+              </Button>
+            </>
+          )}
+          {request.status === "waiting_on_requester" && isOwner && (
+            <Button onClick={() => resubmitMutation.mutate()} disabled={resubmitMutation.isPending} data-testid="button-resubmit">
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              {resubmitMutation.isPending ? "Resubmitting..." : "Resubmit for Review"}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -128,31 +303,240 @@ export default function RequestDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InfoRow icon={User} label="Requester" value={request.requesterName} />
+                <InfoRow icon={UserIcon} label="Requester" value={request.requesterName} />
                 <InfoRow icon={Building2} label="Department" value={request.department} />
-                <InfoRow icon={Target} label="Primary Goal" value={request.primaryGoal} />
-                <InfoRow icon={Users} label="Estimated Users" value={`${request.estimatedUsers}${request.estimatedUsersCount ? ` (${request.estimatedUsersCount})` : ""}`} />
+                {editing ? (
+                  <EditField
+                    icon={Target}
+                    label="Primary Goal"
+                    value={editData.primaryGoal || ""}
+                    onChange={v => setEditData(d => ({ ...d, primaryGoal: v }))}
+                  />
+                ) : (
+                  <InfoRow icon={Target} label="Primary Goal" value={request.primaryGoal} />
+                )}
+                {editing ? (
+                  <div className="flex items-start gap-2">
+                    <Users className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs text-muted-foreground">Estimated Users</p>
+                      <Select value={editData.estimatedUsers || ""} onValueChange={v => setEditData(d => ({ ...d, estimatedUsers: v }))}>
+                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="individual">Individual</SelectItem>
+                          <SelectItem value="team">Team</SelectItem>
+                          <SelectItem value="department">Department</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : (
+                  <InfoRow icon={Users} label="Estimated Users" value={`${request.estimatedUsers}${request.estimatedUsersCount ? ` (${request.estimatedUsersCount})` : ""}`} />
+                )}
               </div>
               <Separator />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InfoRow icon={Workflow} label="Workflow Integration" value={request.workflowIntegration || "N/A"} />
-                <InfoRow icon={Scale} label="Impact Level" value={<ImpactBadge level={request.impactLevel} />} />
+                {editing ? (
+                  <EditField
+                    icon={Workflow}
+                    label="Workflow Integration"
+                    value={editData.workflowIntegration || ""}
+                    onChange={v => setEditData(d => ({ ...d, workflowIntegration: v }))}
+                  />
+                ) : (
+                  <InfoRow icon={Workflow} label="Workflow Integration" value={request.workflowIntegration || "N/A"} />
+                )}
+                {editing ? (
+                  <div className="flex items-start gap-2">
+                    <Scale className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs text-muted-foreground">Impact Level</p>
+                      <Select value={editData.impactLevel || ""} onValueChange={v => setEditData(d => ({ ...d, impactLevel: v }))}>
+                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : (
+                  <InfoRow icon={Scale} label="Impact Level" value={<ImpactBadge level={request.impactLevel} />} />
+                )}
                 <InfoRow icon={Monitor} label="Compatibility" value={formatArray(request.compatibility)} />
-                <InfoRow icon={DollarSign} label="Cost" value={request.annualCost ? `$${Number(request.annualCost).toLocaleString()}/yr (${request.costStructure?.replace(/_/g, " ")})` : "N/A"} />
+                {editing ? (
+                  <div className="flex items-start gap-2">
+                    <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs text-muted-foreground">Annual Cost</p>
+                      <Input
+                        type="number"
+                        className="h-8 mt-1"
+                        value={editData.annualCost || ""}
+                        onChange={e => setEditData(d => ({ ...d, annualCost: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <InfoRow icon={DollarSign} label="Cost" value={request.annualCost ? `$${Number(request.annualCost).toLocaleString()}/yr (${request.costStructure?.replace(/_/g, " ")})` : "N/A"} />
+                )}
               </div>
               <Separator />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InfoRow icon={Database} label="Data Categories" value={formatArray(request.dataInput)} />
-                <InfoRow icon={Shield} label="Data Training" value={request.dataTraining || "N/A"} />
-                <InfoRow icon={Key} label="Login Method" value={request.loginMethod} />
+                {editing ? (
+                  <div className="flex items-start gap-2">
+                    <Shield className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs text-muted-foreground">Data Training</p>
+                      <Select value={editData.dataTraining || ""} onValueChange={v => setEditData(d => ({ ...d, dataTraining: v }))}>
+                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="yes">Yes</SelectItem>
+                          <SelectItem value="no">No</SelectItem>
+                          <SelectItem value="unsure">Unsure</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : (
+                  <InfoRow icon={Shield} label="Data Training" value={request.dataTraining || "N/A"} />
+                )}
+                {editing ? (
+                  <EditField
+                    icon={Key}
+                    label="Login Method"
+                    value={editData.loginMethod || ""}
+                    onChange={v => setEditData(d => ({ ...d, loginMethod: v }))}
+                  />
+                ) : (
+                  <InfoRow icon={Key} label="Login Method" value={request.loginMethod} />
+                )}
                 <InfoRow icon={Calendar} label="Submitted" value={formatDate(request.createdAt)} />
               </div>
-              {request.alternativesChecked && (
+              {request.alternativesChecked && !editing && (
                 <>
                   <Separator />
                   <InfoRow icon={Scale} label="Alternatives Evaluated" value={request.alternativesText || "Yes"} />
                 </>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Comments Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <MessageSquare className="h-5 w-5" /> Comments
+              </CardTitle>
+              <CardDescription>Discussion and notes about this request</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {comments && comments.length > 0 ? (
+                <div className="space-y-3">
+                  {comments.map(c => (
+                    <div key={c.id} className="border rounded-md p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{c.authorName}</span>
+                          <span className="text-xs text-muted-foreground">{formatDate(c.createdAt)}</span>
+                        </div>
+                        {(c.authorId === user?.id || isAdmin) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => deleteCommentMutation.mutate(c.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-sm mt-1 whitespace-pre-wrap">{c.body}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No comments yet.</p>
+              )}
+
+              <div className="flex gap-2">
+                <Textarea
+                  placeholder="Add a comment..."
+                  value={commentText}
+                  onChange={e => setCommentText(e.target.value)}
+                  className="min-h-[60px]"
+                />
+                <Button
+                  className="shrink-0"
+                  disabled={!commentText.trim() || addCommentMutation.isPending}
+                  onClick={() => addCommentMutation.mutate(commentText)}
+                >
+                  Post
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Attachments Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Paperclip className="h-5 w-5" /> Attachments
+              </CardTitle>
+              <CardDescription>Upload supporting documents</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {attachments && attachments.length > 0 ? (
+                <div className="space-y-2">
+                  {attachments.map(a => (
+                    <div key={a.id} className="flex items-center justify-between border rounded-md p-2 px-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{a.fileName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatFileSize(a.fileSize)} &middot; {a.uploaderName} &middot; {formatDate(a.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => window.open(`/api/attachments/${a.id}/download`, "_blank")}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        {(a.uploadedBy === user?.id || isAdmin) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => deleteAttachmentMutation.mutate(a.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No attachments yet.</p>
+              )}
+
+              <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadMutation.isPending}
+              >
+                <Upload className="h-4 w-4 mr-1" />
+                {uploadMutation.isPending ? "Uploading..." : "Upload File"}
+              </Button>
             </CardContent>
           </Card>
 
@@ -174,11 +558,20 @@ export default function RequestDetailPage() {
               <CardTitle className="text-lg">Review Status</CardTitle>
               <CardDescription>Approval workflow progress</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <ReviewStep label="Strategic Review" subtitle="Advisory" review={strategicReview} optional />
+            <CardContent className="space-y-0">
               <ReviewStep label="Security Review" subtitle="Required" review={securityReview} />
+              <ProgressArrow status={securityReview?.decision} />
               <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} />
+              <ProgressArrow status={techReview?.decision} />
               <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} />
+              {strategicReview && (
+                <>
+                  <div className="mt-4 pt-3 border-t">
+                    <p className="text-xs text-muted-foreground mb-2">Advisory</p>
+                    <ReviewStep label="Strategic Review" subtitle="Advisory" review={strategicReview} optional />
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -208,6 +601,18 @@ export default function RequestDetailPage() {
   );
 }
 
+function EditField({ icon: Icon, label, value, onChange }: { icon: any; label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-start gap-2">
+      <Icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+      <div className="flex-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <Input className="h-8 mt-1" value={value} onChange={e => onChange(e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
 function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
   return (
     <div className="flex items-start gap-2">
@@ -216,6 +621,27 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
         <p className="text-xs text-muted-foreground">{label}</p>
         <div className="text-sm font-medium">{typeof value === "string" ? value : value}</div>
       </div>
+    </div>
+  );
+}
+
+function ProgressArrow({ status }: { status?: string }) {
+  const getColor = () => {
+    switch (status) {
+      case "pass":
+        return "text-green-500 dark:text-green-400";
+      case "fail":
+        return "text-gray-700 dark:text-gray-400";
+      case "needs_more_info":
+        return "text-yellow-500 dark:text-yellow-400";
+      default:
+        return "text-muted-foreground/30";
+    }
+  };
+
+  return (
+    <div className="flex justify-center py-1">
+      <ChevronDown className={`h-5 w-5 ${getColor()}`} />
     </div>
   );
 }

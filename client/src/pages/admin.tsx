@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { RoleBadge } from "@/components/status-badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Settings, Layers, Users, Tag } from "lucide-react";
+import { Plus, Layers, Users, Tag, Trash2, Pencil } from "lucide-react";
 import type { PlatformAttributeDefinition, Tier, User } from "@shared/schema";
 
 export default function AdminPage() {
@@ -84,6 +85,26 @@ function AttributesTab() {
       setDefaultValue("");
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/attributes/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Attribute Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/attributes"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleDelete = (id: string, attrName: string) => {
+    if (window.confirm(`Delete attribute "${attrName}"? This cannot be undone.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
 
   if (isLoading) return <Skeleton className="h-48 w-full" />;
 
@@ -157,7 +178,18 @@ function AttributesTab() {
                     {attr.defaultValue ? ` - Default: ${attr.defaultValue}` : ""}
                   </p>
                 </div>
-                <Badge variant="outline">{attr.dataType}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{attr.dataType}</Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(attr.id, attr.name)}
+                    data-testid={`button-delete-attr-${attr.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -177,6 +209,14 @@ function TiersTab() {
   const [description, setDescription] = useState("");
   const [requiredControls, setRequiredControls] = useState("");
   const [allowedDataTypes, setAllowedDataTypes] = useState("");
+
+  // Edit state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editRequiredControls, setEditRequiredControls] = useState("");
+  const [editAllowedDataTypes, setEditAllowedDataTypes] = useState("");
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -200,6 +240,65 @@ function TiersTab() {
       setAllowedDataTypes("");
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = { name: editName, description: editDescription };
+      payload.requiredControls = editRequiredControls.trim()
+        ? editRequiredControls.split(",").map(c => c.trim()).filter(Boolean)
+        : [];
+      payload.allowedDataTypes = editAllowedDataTypes.trim()
+        ? editAllowedDataTypes.split(",").map(d => d.trim()).filter(Boolean)
+        : [];
+      const res = await apiRequest("PATCH", `/api/admin/tiers/${editId}`, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Tier Updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tiers"] });
+      setEditOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/tiers/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Tier Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tiers"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const openEdit = (tier: Tier) => {
+    setEditId(tier.id);
+    setEditName(tier.name);
+    setEditDescription(tier.description || "");
+    setEditRequiredControls(
+      tier.requiredControls && Array.isArray(tier.requiredControls)
+        ? (tier.requiredControls as string[]).join(", ")
+        : ""
+    );
+    setEditAllowedDataTypes(
+      tier.allowedDataTypes && Array.isArray(tier.allowedDataTypes)
+        ? (tier.allowedDataTypes as string[]).join(", ")
+        : ""
+    );
+    setEditOpen(true);
+  };
+
+  const handleDelete = (id: string, tierName: string) => {
+    if (window.confirm(`Delete tier "${tierName}"? Platforms assigned to this tier will lose their tier assignment.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
 
   if (isLoading) return <Skeleton className="h-48 w-full" />;
 
@@ -250,8 +349,32 @@ function TiersTab() {
           <div className="space-y-2">
             {tiersList.map(tier => (
               <div key={tier.id} className="p-3 rounded-md border">
-                <p className="font-medium text-sm">{tier.name}</p>
-                <p className="text-xs text-muted-foreground mt-1">{tier.description || "No description"}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm">{tier.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{tier.description || "No description"}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-primary"
+                      onClick={() => openEdit(tier)}
+                      data-testid={`button-edit-tier-${tier.id}`}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(tier.id, tier.name)}
+                      data-testid={`button-delete-tier-${tier.id}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
                 {tier.requiredControls && Array.isArray(tier.requiredControls) && (tier.requiredControls as string[]).length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     <span className="text-xs text-muted-foreground mr-1">Controls:</span>
@@ -271,13 +394,52 @@ function TiersTab() {
           <p className="text-muted-foreground text-center py-8">No tiers defined yet. Click "Add Tier" to create your first tier.</p>
         )}
       </CardContent>
+
+      {/* Edit Tier Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Tier</DialogTitle>
+            <DialogDescription>Update the tier configuration.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input value={editName} onChange={e => setEditName(e.target.value)} data-testid="input-edit-tier-name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} data-testid="input-edit-tier-desc" />
+            </div>
+            <div className="space-y-2">
+              <Label>Required Controls (comma-separated)</Label>
+              <Input value={editRequiredControls} onChange={e => setEditRequiredControls(e.target.value)} data-testid="input-edit-tier-controls" />
+            </div>
+            <div className="space-y-2">
+              <Label>Allowed Data Types (comma-separated)</Label>
+              <Input value={editAllowedDataTypes} onChange={e => setEditAllowedDataTypes(e.target.value)} data-testid="input-edit-tier-data-types" />
+            </div>
+            <Button onClick={() => updateMutation.mutate()} disabled={!editName || updateMutation.isPending} className="w-full" data-testid="button-update-tier">
+              {updateMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
 
 function UsersTab() {
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
   const { data: usersList, isLoading } = useQuery<User[]>({ queryKey: ["/api/admin/users"] });
+
+  // Add user state
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newDepartment, setNewDepartment] = useState("");
+  const [newRole, setNewRole] = useState("requester");
 
   const updateRoleMutation = useMutation({
     mutationFn: async ({ id, role, reviewerRole }: { id: string; role: string; reviewerRole?: string }) => {
@@ -290,13 +452,101 @@ function UsersTab() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/users/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "User Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/users", {
+        name: newName,
+        email: newEmail,
+        department: newDepartment || null,
+        role: newRole,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "User Added" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setAddOpen(false);
+      setNewName("");
+      setNewEmail("");
+      setNewDepartment("");
+      setNewRole("requester");
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleDelete = (id: string, userName: string) => {
+    if (window.confirm(`Delete user "${userName}"? This cannot be undone.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
+
   if (isLoading) return <Skeleton className="h-48 w-full" />;
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>User Management</CardTitle>
-        <CardDescription>Manage user roles and permissions</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between gap-1">
+        <div>
+          <CardTitle>User Management</CardTitle>
+          <CardDescription>Manage user roles and permissions</CardDescription>
+        </div>
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" data-testid="button-add-user">
+              <Plus className="h-4 w-4 mr-1" /> Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add User</DialogTitle>
+              <DialogDescription>Create a new user account.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Full name" data-testid="input-user-name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Email *</Label>
+                <Input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="user@company.com" data-testid="input-user-email" />
+              </div>
+              <div className="space-y-2">
+                <Label>Department</Label>
+                <Input value={newDepartment} onChange={e => setNewDepartment(e.target.value)} placeholder="e.g., Engineering" data-testid="input-user-dept" />
+              </div>
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <Select value={newRole} onValueChange={setNewRole}>
+                  <SelectTrigger data-testid="select-user-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="requester">Requester</SelectItem>
+                    <SelectItem value="reviewer">Reviewer</SelectItem>
+                    <SelectItem value="chair">Chair</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={() => createUserMutation.mutate()} disabled={!newName || !newEmail || createUserMutation.isPending} className="w-full" data-testid="button-save-user">
+                {createUserMutation.isPending ? "Adding..." : "Add User"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
@@ -319,6 +569,17 @@ function UsersTab() {
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
+                {currentUser?.id !== u.id && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(u.id, u.name)}
+                    data-testid={`button-delete-user-${u.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
           ))}

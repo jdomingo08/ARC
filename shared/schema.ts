@@ -61,6 +61,7 @@ export const requests = pgTable("requests", {
   department: text("department").notNull(),
   toolName: text("tool_name").notNull(),
   status: text("status").notNull().default("pending_reviews"),
+  locked: boolean("locked").default(false).notNull(),
   requesterName: text("requester_name").notNull(),
   primaryGoal: text("primary_goal").notNull(),
   estimatedUsers: text("estimated_users").notNull(),
@@ -184,8 +185,29 @@ export const auditLogs = pgTable("audit_logs", {
   timestamp: timestamp("timestamp").defaultNow().notNull(),
 });
 
+export const requestComments = pgTable("request_comments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id", { length: 36 }).notNull(),
+  authorId: varchar("author_id", { length: 36 }).notNull(),
+  authorName: text("author_name").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const requestAttachments = pgTable("request_attachments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id", { length: 36 }).notNull(),
+  uploadedBy: varchar("uploaded_by", { length: 36 }).notNull(),
+  uploaderName: text("uploader_name").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size").notNull(),
+  mimeType: text("mime_type"),
+  storagePath: text("storage_path").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
-export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true });
+export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
 export const insertReviewDecisionSchema = createInsertSchema(reviewDecisions).omit({ id: true, createdAt: true, superseded: true });
 export const insertPlatformSchema = createInsertSchema(platforms).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAttributeDefinitionSchema = createInsertSchema(platformAttributeDefinitions).omit({ id: true, createdAt: true });
@@ -194,6 +216,8 @@ export const insertRiskFindingSchema = createInsertSchema(riskFindings).omit({ i
 export const insertAgentRunLogSchema = createInsertSchema(agentRunLogs).omit({ id: true, createdAt: true });
 export const insertScanScheduleSchema = createInsertSchema(scanSchedules).omit({ id: true, updatedAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, timestamp: true });
+export const insertRequestCommentSchema = createInsertSchema(requestComments).omit({ id: true, createdAt: true });
+export const insertRequestAttachmentSchema = createInsertSchema(requestAttachments).omit({ id: true, createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -215,3 +239,7 @@ export type ScanSchedule = typeof scanSchedules.$inferSelect;
 export type InsertScanSchedule = z.infer<typeof insertScanScheduleSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type RequestComment = typeof requestComments.$inferSelect;
+export type InsertRequestComment = z.infer<typeof insertRequestCommentSchema>;
+export type RequestAttachment = typeof requestAttachments.$inferSelect;
+export type InsertRequestAttachment = z.infer<typeof insertRequestAttachmentSchema>;

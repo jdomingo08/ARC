@@ -3,7 +3,7 @@ import { eq, desc, and, ilike } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
-  agentRunLogs, auditLogs, scanSchedules,
+  agentRunLogs, auditLogs, requestComments, requestAttachments,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
@@ -14,6 +14,8 @@ import {
   type AgentRunLog, type InsertAgentRunLog,
   type ScanSchedule, type InsertScanSchedule,
   type AuditLog, type InsertAuditLog,
+  type RequestComment, type InsertRequestComment,
+  type RequestAttachment, type InsertRequestAttachment,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -39,13 +41,19 @@ export interface IStorage {
   getPlatformByToolName(toolName: string): Promise<Platform | undefined>;
   getAllPlatforms(): Promise<Platform[]>;
   updatePlatform(id: string, data: Partial<Platform>): Promise<Platform | undefined>;
+  deletePlatform(id: string): Promise<boolean>;
 
   createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition>;
   getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]>;
+  deleteAttributeDefinition(id: string): Promise<boolean>;
 
   createTier(tier: InsertTier): Promise<Tier>;
   getAllTiers(): Promise<Tier[]>;
   getTier(id: string): Promise<Tier | undefined>;
+  updateTier(id: string, data: Partial<Tier>): Promise<Tier | undefined>;
+  deleteTier(id: string): Promise<boolean>;
+
+  deleteUser(id: string): Promise<boolean>;
 
   createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding>;
   getRiskFindingsByPlatform(platformId: string): Promise<RiskFinding[]>;
@@ -61,6 +69,15 @@ export interface IStorage {
 
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
+
+  createRequestComment(comment: InsertRequestComment): Promise<RequestComment>;
+  getCommentsByRequest(requestId: string): Promise<RequestComment[]>;
+  deleteRequestComment(id: string): Promise<boolean>;
+
+  createRequestAttachment(attachment: InsertRequestAttachment): Promise<RequestAttachment>;
+  getAttachmentsByRequest(requestId: string): Promise<RequestAttachment[]>;
+  getAttachment(id: string): Promise<RequestAttachment | undefined>;
+  deleteRequestAttachment(id: string): Promise<boolean>;
 
   seedData(): Promise<void>;
 }
@@ -158,6 +175,11 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async deletePlatform(id: string): Promise<boolean> {
+    const result = await db.delete(platforms).where(eq(platforms.id, id)).returning();
+    return result.length > 0;
+  }
+
   async createAttributeDefinition(attr: InsertAttributeDefinition): Promise<PlatformAttributeDefinition> {
     const [created] = await db.insert(platformAttributeDefinitions).values(attr).returning();
     return created;
@@ -165,6 +187,11 @@ export class DatabaseStorage implements IStorage {
 
   async getAllAttributeDefinitions(): Promise<PlatformAttributeDefinition[]> {
     return db.select().from(platformAttributeDefinitions).orderBy(platformAttributeDefinitions.name);
+  }
+
+  async deleteAttributeDefinition(id: string): Promise<boolean> {
+    const result = await db.delete(platformAttributeDefinitions).where(eq(platformAttributeDefinitions.id, id)).returning();
+    return result.length > 0;
   }
 
   async createTier(tier: InsertTier): Promise<Tier> {
@@ -179,6 +206,21 @@ export class DatabaseStorage implements IStorage {
   async getTier(id: string): Promise<Tier | undefined> {
     const [tier] = await db.select().from(tiers).where(eq(tiers.id, id));
     return tier;
+  }
+
+  async updateTier(id: string, data: Partial<Tier>): Promise<Tier | undefined> {
+    const [updated] = await db.update(tiers).set(data).where(eq(tiers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTier(id: string): Promise<boolean> {
+    const result = await db.delete(tiers).where(eq(tiers.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
   }
 
   async createRiskFinding(finding: InsertRiskFinding): Promise<RiskFinding> {
@@ -246,6 +288,39 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(auditLogs)
       .where(and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)))
       .orderBy(desc(auditLogs.timestamp));
+  }
+
+  async createRequestComment(comment: InsertRequestComment): Promise<RequestComment> {
+    const [created] = await db.insert(requestComments).values(comment).returning();
+    return created;
+  }
+
+  async getCommentsByRequest(requestId: string): Promise<RequestComment[]> {
+    return db.select().from(requestComments).where(eq(requestComments.requestId, requestId)).orderBy(desc(requestComments.createdAt));
+  }
+
+  async deleteRequestComment(id: string): Promise<boolean> {
+    const result = await db.delete(requestComments).where(eq(requestComments.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async createRequestAttachment(attachment: InsertRequestAttachment): Promise<RequestAttachment> {
+    const [created] = await db.insert(requestAttachments).values(attachment).returning();
+    return created;
+  }
+
+  async getAttachmentsByRequest(requestId: string): Promise<RequestAttachment[]> {
+    return db.select().from(requestAttachments).where(eq(requestAttachments.requestId, requestId)).orderBy(desc(requestAttachments.createdAt));
+  }
+
+  async getAttachment(id: string): Promise<RequestAttachment | undefined> {
+    const [attachment] = await db.select().from(requestAttachments).where(eq(requestAttachments.id, id));
+    return attachment;
+  }
+
+  async deleteRequestAttachment(id: string): Promise<boolean> {
+    const result = await db.delete(requestAttachments).where(eq(requestAttachments.id, id)).returning();
+    return result.length > 0;
   }
 
   async seedData(): Promise<void> {
