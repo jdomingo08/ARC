@@ -156,6 +156,11 @@ export async function registerRoutes(
           loginMethod: data.loginMethod,
           ownerId: user.id,
         });
+      } else if (data.annualCost) {
+        platform = await storage.updatePlatform(platform.id, {
+          annualCost: data.annualCost,
+          costStructure: data.costStructure || platform.costStructure,
+        }) || platform;
       }
 
       data.platformId = platform.id;
