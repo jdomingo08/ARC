@@ -7,10 +7,13 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusBadge, ImpactBadge, RiskBadge, ConfidenceBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,6 +33,7 @@ import {
   Pencil,
   Save,
   X,
+  Plus,
 } from "lucide-react";
 import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition } from "@shared/schema";
 
@@ -42,6 +46,18 @@ export default function PlatformDetailPage() {
 
   const [editingAttrs, setEditingAttrs] = useState(false);
   const [attrValues, setAttrValues] = useState<Record<string, any>>({});
+
+  // Edit platform details state
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [detailValues, setDetailValues] = useState<Record<string, any>>({});
+
+  // Add attribute dialog state
+  const [addAttrOpen, setAddAttrOpen] = useState(false);
+  const [newAttrName, setNewAttrName] = useState("");
+  const [newAttrType, setNewAttrType] = useState("text");
+  const [newAttrOptions, setNewAttrOptions] = useState("");
+  const [newAttrDefault, setNewAttrDefault] = useState("");
+  const [newAttrRequired, setNewAttrRequired] = useState(false);
 
   const { data: platform, isLoading } = useQuery<Platform>({
     queryKey: ["/api/platforms", id],
@@ -102,6 +118,50 @@ export default function PlatformDetailPage() {
     },
   });
 
+  const updateDetailsMutation = useMutation({
+    mutationFn: async (updates: Record<string, any>) => {
+      const res = await apiRequest("PATCH", `/api/platforms/${id}`, updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Platform Updated" });
+      setEditingDetails(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const createAttrMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = {
+        name: newAttrName,
+        dataType: newAttrType,
+        required: newAttrRequired,
+        defaultValue: newAttrDefault || null,
+        options: (newAttrType === "dropdown" || newAttrType === "multi_select")
+          ? newAttrOptions.split(",").map(s => s.trim()).filter(Boolean)
+          : null,
+      };
+      const res = await apiRequest("POST", "/api/admin/attributes", payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Attribute Created" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/attributes"] });
+      setAddAttrOpen(false);
+      setNewAttrName("");
+      setNewAttrType("text");
+      setNewAttrOptions("");
+      setNewAttrDefault("");
+      setNewAttrRequired(false);
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
   const formatDate = (date: string | Date | null) => {
     if (!date) return "N/A";
     return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -140,6 +200,33 @@ export default function PlatformDetailPage() {
 
   const saveAttrs = () => {
     updateAttrsMutation.mutate(attrValues);
+  };
+
+  const startEditingDetails = () => {
+    setDetailValues({
+      department: platform.department || "",
+      estimatedUsers: platform.estimatedUsers || "",
+      impactLevel: platform.impactLevel || "",
+      annualCost: platform.annualCost || "",
+      dataTraining: platform.dataTraining || "",
+      loginMethod: platform.loginMethod || "",
+      primaryGoal: platform.primaryGoal || "",
+      status: platform.status || "",
+    });
+    setEditingDetails(true);
+  };
+
+  const saveDetails = () => {
+    updateDetailsMutation.mutate({
+      department: detailValues.department || null,
+      estimatedUsers: detailValues.estimatedUsers || null,
+      impactLevel: detailValues.impactLevel || null,
+      annualCost: detailValues.annualCost || null,
+      dataTraining: detailValues.dataTraining || null,
+      loginMethod: detailValues.loginMethod || null,
+      primaryGoal: detailValues.primaryGoal || null,
+      status: detailValues.status || platform.status,
+    });
   };
 
   const renderAttrInput = (attr: PlatformAttributeDefinition) => {
@@ -272,12 +359,64 @@ export default function PlatformDetailPage() {
       </div>
 
       {/* Custom Attributes Card — prominent position */}
-      {attrDefs && attrDefs.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Custom Attributes</CardTitle>
-              {isAdmin && !editingAttrs && (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg">Custom Attributes</CardTitle>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <Dialog open={addAttrOpen} onOpenChange={setAddAttrOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Plus className="h-4 w-4 mr-1" /> Add Attribute
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Custom Attribute</DialogTitle>
+                      <DialogDescription>Define a new attribute that will appear on all platforms.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Attribute Name *</Label>
+                        <Input value={newAttrName} onChange={e => setNewAttrName(e.target.value)} placeholder="e.g., Vendor, Contract Expiry" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Data Type</Label>
+                        <Select value={newAttrType} onValueChange={setNewAttrType}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="text">Text</SelectItem>
+                            <SelectItem value="number">Number</SelectItem>
+                            <SelectItem value="dropdown">Dropdown</SelectItem>
+                            <SelectItem value="multi_select">Multi-Select</SelectItem>
+                            <SelectItem value="date">Date</SelectItem>
+                            <SelectItem value="boolean">Boolean</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(newAttrType === "dropdown" || newAttrType === "multi_select") && (
+                        <div className="space-y-2">
+                          <Label>Options (comma-separated)</Label>
+                          <Input value={newAttrOptions} onChange={e => setNewAttrOptions(e.target.value)} placeholder="Option A, Option B, Option C" />
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <Label>Default Value</Label>
+                        <Input value={newAttrDefault} onChange={e => setNewAttrDefault(e.target.value)} placeholder="Optional default" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox checked={newAttrRequired} onCheckedChange={c => setNewAttrRequired(!!c)} />
+                        <Label>Required</Label>
+                      </div>
+                      <Button onClick={() => createAttrMutation.mutate()} disabled={!newAttrName || createAttrMutation.isPending} className="w-full">
+                        {createAttrMutation.isPending ? "Creating..." : "Create Attribute"}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+              {isAdmin && !editingAttrs && attrDefs && attrDefs.length > 0 && (
                 <Button variant="ghost" size="sm" onClick={startEditingAttrs}>
                   <Pencil className="h-4 w-4 mr-1" /> Edit
                 </Button>
@@ -293,8 +432,10 @@ export default function PlatformDetailPage() {
                 </div>
               )}
             </div>
-          </CardHeader>
-          <CardContent>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {attrDefs && attrDefs.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {attrDefs.map(attr => (
                 <div key={attr.id}>
@@ -309,27 +450,116 @@ export default function PlatformDetailPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <p className="text-sm text-muted-foreground">No custom attributes defined yet. {isAdmin ? "Click \"Add Attribute\" to create one." : ""}</p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Platform Details</CardTitle>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Platform Details</CardTitle>
+                {isAdmin && !editingDetails && (
+                  <Button variant="ghost" size="sm" onClick={startEditingDetails}>
+                    <Pencil className="h-4 w-4 mr-1" /> Edit
+                  </Button>
+                )}
+                {editingDetails && (
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={saveDetails} disabled={updateDetailsMutation.isPending}>
+                      <Save className="h-4 w-4 mr-1" /> {updateDetailsMutation.isPending ? "Saving..." : "Save"}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingDetails(false)}>
+                      <X className="h-4 w-4 mr-1" /> Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InfoRow icon={Building2} label="Department" value={platform.department || "N/A"} />
-                <InfoRow icon={Users} label="Estimated Users" value={platform.estimatedUsers || "N/A"} />
-                <InfoRow icon={Target} label="Impact Level" value={platform.impactLevel ? <ImpactBadge level={platform.impactLevel} /> : "N/A"} />
-                <InfoRow icon={DollarSign} label="Annual Cost" value={platform.annualCost ? `$${Number(platform.annualCost).toLocaleString()}` : "Free"} />
-                <InfoRow icon={Database} label="Data Categories" value={formatArray(platform.dataInput)} />
-                <InfoRow icon={Shield} label="Data Training" value={platform.dataTraining || "N/A"} />
-                <InfoRow icon={Key} label="Login Method" value={platform.loginMethod || "N/A"} />
-                <InfoRow icon={Calendar} label="Last Reviewed" value={formatDate(platform.lastReviewedAt)} />
-              </div>
+              {editingDetails ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Description / Primary Goal</Label>
+                    <Textarea
+                      value={detailValues.primaryGoal}
+                      onChange={e => setDetailValues(v => ({ ...v, primaryGoal: e.target.value }))}
+                      className="h-20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Status</Label>
+                    <Select value={detailValues.status} onValueChange={v => setDetailValues(vals => ({ ...vals, status: v }))}>
+                      <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="on_review">On Review</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                        <SelectItem value="retired">Retired</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Department</Label>
+                    <Input className="h-8" value={detailValues.department} onChange={e => setDetailValues(v => ({ ...v, department: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Estimated Users</Label>
+                    <Select value={detailValues.estimatedUsers} onValueChange={v => setDetailValues(vals => ({ ...vals, estimatedUsers: v }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="individual">Individual</SelectItem>
+                        <SelectItem value="team">Team</SelectItem>
+                        <SelectItem value="department">Department</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Impact Level</Label>
+                    <Select value={detailValues.impactLevel} onValueChange={v => setDetailValues(vals => ({ ...vals, impactLevel: v }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Annual Cost ($)</Label>
+                    <Input type="number" className="h-8" value={detailValues.annualCost} onChange={e => setDetailValues(v => ({ ...v, annualCost: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Data Training</Label>
+                    <Select value={detailValues.dataTraining} onValueChange={v => setDetailValues(vals => ({ ...vals, dataTraining: v }))}>
+                      <SelectTrigger className="h-8"><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Yes</SelectItem>
+                        <SelectItem value="no">No</SelectItem>
+                        <SelectItem value="unsure">Unsure</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Login Method</Label>
+                    <Input className="h-8" value={detailValues.loginMethod} onChange={e => setDetailValues(v => ({ ...v, loginMethod: e.target.value }))} />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InfoRow icon={Building2} label="Department" value={platform.department || "N/A"} />
+                  <InfoRow icon={Users} label="Estimated Users" value={platform.estimatedUsers || "N/A"} />
+                  <InfoRow icon={Target} label="Impact Level" value={platform.impactLevel ? <ImpactBadge level={platform.impactLevel} /> : "N/A"} />
+                  <InfoRow icon={DollarSign} label="Annual Cost" value={platform.annualCost ? `$${Number(platform.annualCost).toLocaleString()}` : "Free"} />
+                  <InfoRow icon={Database} label="Data Categories" value={formatArray(platform.dataInput)} />
+                  <InfoRow icon={Shield} label="Data Training" value={platform.dataTraining || "N/A"} />
+                  <InfoRow icon={Key} label="Login Method" value={platform.loginMethod || "N/A"} />
+                  <InfoRow icon={Calendar} label="Last Reviewed" value={formatDate(platform.lastReviewedAt)} />
+                </div>
+              )}
 
               {platform.decisionSummary && (
                 <>
