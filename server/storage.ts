@@ -1,5 +1,6 @@
 import { db } from "./db";
-import { eq, desc, and, ilike } from "drizzle-orm";
+import { pool } from "./db";
+import { eq, desc, and, ilike, sql } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
@@ -324,6 +325,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seedData(): Promise<void> {
+    // Runtime migration: add logo_url column if missing
+    await pool.query(`
+      ALTER TABLE platforms ADD COLUMN IF NOT EXISTS logo_url TEXT;
+    `).catch(() => { /* column may already exist */ });
+
     const existingUsers = await db.select().from(users);
     if (existingUsers.length > 0) return;
 
