@@ -50,9 +50,6 @@ export class OpenAIProvider implements LLMProvider {
         },
       ],
       temperature: temperature ?? 0.3,
-      text: responseFormat === "json"
-        ? { format: { type: "json_object" } }
-        : undefined,
     });
 
     // Extract text content and citations from the response
