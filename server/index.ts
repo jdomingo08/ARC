@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { RiskScheduler } from "./risk-agent/scheduler";
+import { AlertScheduler } from "./alert-scheduler";
 import { storage } from "./storage";
 
 const app = express();
@@ -64,11 +65,19 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
 
+  // Run one-time startup data migrations
+  await storage.runStartupMigrations();
+
   // Initialize risk scan scheduler
   const riskScheduler = new RiskScheduler(storage);
   await riskScheduler.initialize();
   // Make scheduler accessible to route handlers for live reload
   (globalThis as any).__riskScheduler = riskScheduler;
+
+  // Initialize alert scheduler
+  const alertScheduler = new AlertScheduler(storage);
+  await alertScheduler.initialize();
+  (globalThis as any).__alertScheduler = alertScheduler;
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -46,6 +46,7 @@ export default function RequestDetailPage() {
   const [, params] = useRoute("/requests/:id");
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const id = params?.id;
 
   const [editing, setEditing] = useState(false);
@@ -114,6 +115,20 @@ export default function RequestDetailPage() {
     onSuccess: (data: any) => {
       toast({ title: data.locked ? "Request Locked" : "Request Unlocked" });
       queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+    },
+  });
+
+  const deleteRequestMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", `/api/requests/${id}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Request Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/requests"] });
+      setLocation("/requests");
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
 
@@ -269,6 +284,21 @@ export default function RequestDetailPage() {
             >
               {request.locked ? <Unlock className="h-4 w-4 mr-1" /> : <Lock className="h-4 w-4 mr-1" />}
               {request.locked ? "Unlock" : "Lock"}
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => {
+                if (window.confirm(`Delete request "${request.toolName}"? This cannot be undone.`)) {
+                  deleteRequestMutation.mutate();
+                }
+              }}
+              disabled={deleteRequestMutation.isPending}
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Delete
             </Button>
           )}
           {canEdit && !editing && (
