@@ -827,9 +827,9 @@ export default function PlatformDetailPage() {
             <CardContent>
               {(() => {
                 const dynAttrs = (platform.dynamicAttributes || {}) as Record<string, any>;
-                const contractDate = dynAttrs["Contract Expiration"];
+                const contractDate = dynAttrs["Contract Expiration Date"];
                 if (!contractDate) {
-                  return <p className="text-sm text-muted-foreground">Set the "Contract Expiration" attribute to enable alerts.</p>;
+                  return <p className="text-sm text-muted-foreground">Set the "Contract Expiration Date" attribute to enable alerts.</p>;
                 }
                 const expiry = new Date(contractDate);
                 const now = new Date();

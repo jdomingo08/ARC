@@ -4,7 +4,7 @@ import { eq, desc, and, ilike, sql } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
-  agentRunLogs, auditLogs, scanSchedules, requestComments, requestAttachments,
+  agentRunLogs, auditLogs, scanSchedules, alertSchedules, requestComments, requestAttachments,
   platformStakeholders, expirationAlerts, platformAttachments,
   type User, type InsertUser,
   type Request, type InsertRequest,
@@ -15,6 +15,7 @@ import {
   type RiskFinding, type InsertRiskFinding,
   type AgentRunLog, type InsertAgentRunLog,
   type ScanSchedule, type InsertScanSchedule,
+  type AlertSchedule, type InsertAlertSchedule,
   type AuditLog, type InsertAuditLog,
   type RequestComment, type InsertRequestComment,
   type RequestAttachment, type InsertRequestAttachment,
@@ -69,8 +70,13 @@ export interface IStorage {
   updateAgentRunLogStatus(id: string, status: string, resultsSummary?: string, findingsCount?: number): Promise<void>;
   getRunningAgentLogs(): Promise<AgentRunLog[]>;
 
+  deleteRequest(id: string): Promise<boolean>;
+
   getScanSchedule(): Promise<ScanSchedule | undefined>;
   upsertScanSchedule(data: Partial<InsertScanSchedule> & { id?: string }): Promise<ScanSchedule>;
+
+  getAlertSchedule(): Promise<AlertSchedule | undefined>;
+  upsertAlertSchedule(data: Partial<InsertAlertSchedule> & { id?: string }): Promise<AlertSchedule>;
 
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogsByEntity(entityType: string, entityId: string): Promise<AuditLog[]>;
@@ -103,6 +109,7 @@ export interface IStorage {
   deletePlatformAttachment(id: string): Promise<boolean>;
 
   seedData(): Promise<void>;
+  runStartupMigrations(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -157,6 +164,11 @@ export class DatabaseStorage implements IStorage {
   async updateRequest(id: string, data: Partial<Request>): Promise<Request | undefined> {
     const [updated] = await db.update(requests).set({ ...data, updatedAt: new Date() }).where(eq(requests.id, id)).returning();
     return updated;
+  }
+
+  async deleteRequest(id: string): Promise<boolean> {
+    const result = await db.delete(requests).where(eq(requests.id, id)).returning();
+    return result.length > 0;
   }
 
   async createReviewDecision(decision: InsertReviewDecision): Promise<ReviewDecision> {
@@ -298,6 +310,27 @@ export class DatabaseStorage implements IStorage {
       enabled: data.enabled ?? true,
       scope: data.scope || "all",
       createdBy: data.createdBy,
+    }).returning();
+    return created;
+  }
+
+  async getAlertSchedule(): Promise<AlertSchedule | undefined> {
+    const [schedule] = await db.select().from(alertSchedules).limit(1);
+    return schedule;
+  }
+
+  async upsertAlertSchedule(data: Partial<InsertAlertSchedule> & { id?: string }): Promise<AlertSchedule> {
+    const existing = await this.getAlertSchedule();
+    if (existing) {
+      const [updated] = await db.update(alertSchedules)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(alertSchedules.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(alertSchedules).values({
+      cronExpression: data.cronExpression || "0 8 * * *",
+      enabled: data.enabled ?? false,
     }).returning();
     return created;
   }
@@ -622,10 +655,31 @@ export class DatabaseStorage implements IStorage {
     });
 
     await db.insert(platformAttributeDefinitions).values([
-      { name: "Contract Expiration", dataType: "date", required: false },
+      { name: "Contract Expiration Date", dataType: "date", required: false },
       { name: "Data Residency", dataType: "dropdown", options: ["US", "EU", "APAC", "Global"], required: false },
       { name: "SOC2 Certified", dataType: "boolean", required: false, defaultValue: "false" },
     ]);
+  }
+
+  async runStartupMigrations(): Promise<void> {
+    // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"
+    await db.execute(sql`
+      UPDATE platform_attribute_definitions
+      SET name = 'Contract Expiration Date'
+      WHERE name IN ('Contract Expiry', 'Contract Expiration')
+    `);
+
+    // Rename the JSON key in all platform dynamic_attributes
+    await db.execute(sql`
+      UPDATE platforms
+      SET dynamic_attributes = (dynamic_attributes - 'Contract Expiry' - 'Contract Expiration')
+        || CASE WHEN dynamic_attributes ? 'Contract Expiry'
+                THEN jsonb_build_object('Contract Expiration Date', dynamic_attributes->'Contract Expiry')
+                WHEN dynamic_attributes ? 'Contract Expiration'
+                THEN jsonb_build_object('Contract Expiration Date', dynamic_attributes->'Contract Expiration')
+                ELSE '{}'::jsonb END
+      WHERE dynamic_attributes ? 'Contract Expiry' OR dynamic_attributes ? 'Contract Expiration'
+    `);
   }
 }
 

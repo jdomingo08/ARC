@@ -15,15 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { RoleBadge } from "@/components/status-badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Layers, Users, Tag, Trash2, Pencil } from "lucide-react";
-import type { PlatformAttributeDefinition, Tier, User } from "@shared/schema";
+import { Plus, Layers, Users, Tag, Trash2, Pencil, Bell, Save } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import type { PlatformAttributeDefinition, Tier, User, AlertSchedule } from "@shared/schema";
 
 export default function AdminPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-admin-title">Administration</h1>
-        <p className="text-muted-foreground mt-1">Manage attributes, tiers, and user roles</p>
+        <p className="text-muted-foreground mt-1">Manage attributes, tiers, user roles, and alert schedules</p>
       </div>
 
       <Tabs defaultValue="attributes">
@@ -37,6 +38,9 @@ export default function AdminPage() {
           <TabsTrigger value="users" data-testid="tab-users">
             <Users className="h-4 w-4 mr-1" /> Users
           </TabsTrigger>
+          <TabsTrigger value="alerts" data-testid="tab-alerts">
+            <Bell className="h-4 w-4 mr-1" /> Alerts
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="attributes" className="mt-4">
@@ -47,6 +51,9 @@ export default function AdminPage() {
         </TabsContent>
         <TabsContent value="users" className="mt-4">
           <UsersTab />
+        </TabsContent>
+        <TabsContent value="alerts" className="mt-4">
+          <AlertsTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -584,6 +591,118 @@ function UsersTab() {
             </div>
           ))}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const ALERT_FREQUENCY_PRESETS = [
+  { label: "Daily (8 AM)", cron: "0 8 * * *" },
+  { label: "Daily (midnight)", cron: "0 0 * * *" },
+  { label: "Weekly (Monday)", cron: "0 8 * * 1" },
+  { label: "Every 6 hours", cron: "0 */6 * * *" },
+];
+
+function AlertsTab() {
+  const { toast } = useToast();
+  const [scheduleEnabled, setScheduleEnabled] = useState<boolean | null>(null);
+  const [scheduleCron, setScheduleCron] = useState<string>("");
+  const [scheduleModified, setScheduleModified] = useState(false);
+
+  const { data: schedule } = useQuery<AlertSchedule>({
+    queryKey: ["/api/alerts/schedule"],
+    select: (data) => {
+      if (scheduleEnabled === null && data) {
+        setScheduleEnabled(data.enabled);
+        setScheduleCron(data.cronExpression);
+      }
+      return data;
+    },
+  });
+
+  const saveScheduleMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PUT", "/api/alerts/schedule", {
+        enabled: scheduleEnabled,
+        cronExpression: scheduleCron,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Alert Schedule Updated", description: "Expiration alert schedule has been saved." });
+      setScheduleModified(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/alerts/schedule"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const formatDate = (date: string | Date) =>
+    new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Bell className="h-4 w-4" /> Expiration Alert Schedule
+        </CardTitle>
+        <CardDescription>Configure automatic contract expiration alert checking</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          When enabled, the system automatically checks all platforms for upcoming contract expirations
+          and triggers alerts on the configured schedule.
+        </p>
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={scheduleEnabled ?? false}
+            onCheckedChange={(checked) => {
+              setScheduleEnabled(checked);
+              setScheduleModified(true);
+            }}
+            id="alert-schedule-enabled"
+          />
+          <Label htmlFor="alert-schedule-enabled">Enable automatic alert checking</Label>
+        </div>
+        {scheduleEnabled && (
+          <div className="space-y-2">
+            <Label>Frequency</Label>
+            <Select
+              value={scheduleCron}
+              onValueChange={(value) => {
+                setScheduleCron(value);
+                setScheduleModified(true);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select frequency" />
+              </SelectTrigger>
+              <SelectContent>
+                {ALERT_FREQUENCY_PRESETS.map(preset => (
+                  <SelectItem key={preset.cron} value={preset.cron}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Cron: <code className="px-1 py-0.5 bg-muted rounded text-[11px]">{scheduleCron}</code>
+            </p>
+          </div>
+        )}
+        {schedule?.lastRunAt && (
+          <p className="text-xs text-muted-foreground">Last run: {formatDate(schedule.lastRunAt)}</p>
+        )}
+        {scheduleModified && (
+          <Button
+            size="sm"
+            onClick={() => saveScheduleMutation.mutate()}
+            disabled={saveScheduleMutation.isPending}
+          >
+            {saveScheduleMutation.isPending ? "Saving..." : <><Save className="h-3 w-3 mr-1" /> Save Schedule</>}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

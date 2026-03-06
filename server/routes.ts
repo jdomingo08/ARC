@@ -261,6 +261,18 @@ export async function registerRoutes(
     }
   });
 
+  // Delete request (admin only)
+  app.delete("/api/requests/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      await storage.deleteRequest(req.params.id);
+      res.json({ message: "Request deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   app.get("/api/requests/:id/reviews", requireAuth, async (req, res) => {
     try {
       const reviews = await storage.getReviewDecisionsByRequest(req.params.id);
@@ -940,7 +952,7 @@ export async function registerRoutes(
       const allPlatforms = await storage.getAllPlatforms();
       const allAlerts = await storage.getAllExpirationAlerts();
       const attrDefs = await storage.getAllAttributeDefinitions();
-      const contractAttr = attrDefs.find((a: PlatformAttributeDefinition) => a.name === "Contract Expiration");
+      const contractAttr = attrDefs.find((a: PlatformAttributeDefinition) => a.name === "Contract Expiration Date");
 
       if (!contractAttr) {
         return res.json({ message: "No 'Contract Expiration' attribute defined", notifications: [] });
@@ -951,7 +963,7 @@ export async function registerRoutes(
 
       for (const platform of allPlatforms) {
         const dynAttrs = (platform.dynamicAttributes || {}) as Record<string, any>;
-        const expiryDate = dynAttrs["Contract Expiration"];
+        const expiryDate = dynAttrs["Contract Expiration Date"];
         if (!expiryDate) continue;
 
         const expiry = new Date(expiryDate);
@@ -989,6 +1001,29 @@ export async function registerRoutes(
       }
 
       res.json({ notifications, checked: allPlatforms.length });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Alert Schedule ---
+  app.get("/api/alerts/schedule", requireAuth, requireRole("admin", "chair"), async (_req, res) => {
+    try {
+      const schedule = await storage.getAlertSchedule();
+      res.json(schedule || { enabled: false, cronExpression: "0 8 * * *", lastRunAt: null });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.put("/api/alerts/schedule", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const { enabled, cronExpression } = req.body;
+      const schedule = await storage.upsertAlertSchedule({ enabled, cronExpression });
+      if ((globalThis as any).__alertScheduler) {
+        (globalThis as any).__alertScheduler.reload(schedule);
+      }
+      res.json(schedule);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

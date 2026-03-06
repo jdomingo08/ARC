@@ -228,6 +228,14 @@ export const expirationAlerts = pgTable("expiration_alerts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const alertSchedules = pgTable("alert_schedules", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  cronExpression: text("cron_expression").notNull().default("0 8 * * *"),
+  enabled: boolean("enabled").notNull().default(false),
+  lastRunAt: timestamp("last_run_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const platformAttachments = pgTable("platform_attachments", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   platformId: varchar("platform_id", { length: 36 }).notNull(),
@@ -249,6 +257,7 @@ export const insertTierSchema = createInsertSchema(tiers).omit({ id: true, creat
 export const insertRiskFindingSchema = createInsertSchema(riskFindings).omit({ id: true, createdAt: true });
 export const insertAgentRunLogSchema = createInsertSchema(agentRunLogs).omit({ id: true, createdAt: true });
 export const insertScanScheduleSchema = createInsertSchema(scanSchedules).omit({ id: true, updatedAt: true });
+export const insertAlertScheduleSchema = createInsertSchema(alertSchedules).omit({ id: true, updatedAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, timestamp: true });
 export const insertRequestCommentSchema = createInsertSchema(requestComments).omit({ id: true, createdAt: true });
 export const insertRequestAttachmentSchema = createInsertSchema(requestAttachments).omit({ id: true, createdAt: true });
@@ -274,6 +283,8 @@ export type AgentRunLog = typeof agentRunLogs.$inferSelect;
 export type InsertAgentRunLog = z.infer<typeof insertAgentRunLogSchema>;
 export type ScanSchedule = typeof scanSchedules.$inferSelect;
 export type InsertScanSchedule = z.infer<typeof insertScanScheduleSchema>;
+export type AlertSchedule = typeof alertSchedules.$inferSelect;
+export type InsertAlertSchedule = z.infer<typeof insertAlertScheduleSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type RequestComment = typeof requestComments.$inferSelect;
