@@ -129,7 +129,7 @@ function AttributesTab() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Name *</Label>
-                <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Contract Expiry" data-testid="input-attr-name" />
+                <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Contract Expiration" data-testid="input-attr-name" />
               </div>
               <div className="space-y-2">
                 <Label>Data Type *</Label>

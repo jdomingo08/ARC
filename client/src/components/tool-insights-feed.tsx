@@ -106,7 +106,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   // Empty state - no tool name entered yet
   if (!toolName.trim() || toolName.trim().length < 3) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+      <div className="min-h-[350px] flex flex-col items-center justify-center text-center p-6 space-y-3">
         <div className="p-3 rounded-full bg-muted">
           <Sparkles className="h-6 w-6 text-muted-foreground" />
         </div>
@@ -123,7 +123,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   // Loading state
   if (mutation.isPending) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+      <div className="min-h-[350px] flex flex-col items-center justify-center text-center p-6 space-y-3">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <div>
           <h3 className="text-sm font-semibold">Researching {toolName}...</h3>
@@ -146,7 +146,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   // Error state
   if (mutation.isError) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+      <div className="min-h-[350px] flex flex-col items-center justify-center text-center p-6 space-y-3">
         <div className="p-3 rounded-full bg-destructive/10">
           <AlertCircle className="h-6 w-6 text-destructive" />
         </div>
@@ -163,7 +163,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   // No data yet
   if (!insights) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
+      <div className="min-h-[350px] flex flex-col items-center justify-center text-center p-6 space-y-3">
         <div className="p-3 rounded-full bg-muted">
           <Sparkles className="h-6 w-6 text-muted-foreground" />
         </div>
@@ -178,7 +178,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-[350px]">
       {/* Header */}
       <div className="p-3 border-b bg-gradient-to-r from-primary/5 to-primary/10 shrink-0">
         <div className="flex items-center gap-2">

@@ -34,8 +34,14 @@ import {
   Save,
   X,
   Plus,
+  Mail,
+  Bell,
+  Upload,
+  Download,
+  Paperclip,
+  UserPlus,
 } from "lucide-react";
-import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition } from "@shared/schema";
+import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition, PlatformStakeholder, ExpirationAlert, PlatformAttachment } from "@shared/schema";
 
 export default function PlatformDetailPage() {
   const [, params] = useRoute("/platforms/:id");
@@ -76,6 +82,24 @@ export default function PlatformDetailPage() {
   const { data: attrDefs } = useQuery<PlatformAttributeDefinition[]>({
     queryKey: ["/api/admin/attributes"],
   });
+  const { data: stakeholders } = useQuery<PlatformStakeholder[]>({
+    queryKey: ["/api/platforms", id, "stakeholders"],
+    enabled: !!id,
+  });
+  const { data: platformAttachments } = useQuery<PlatformAttachment[]>({
+    queryKey: ["/api/platforms", id, "attachments"],
+    enabled: !!id,
+  });
+  const { data: alerts } = useQuery<ExpirationAlert[]>({
+    queryKey: ["/api/platforms", id, "alerts"],
+    enabled: !!id,
+  });
+
+  // Stakeholder form state
+  const [addStakeholderOpen, setAddStakeholderOpen] = useState(false);
+  const [stakeholderName, setStakeholderName] = useState("");
+  const [stakeholderEmail, setStakeholderEmail] = useState("");
+  const [stakeholderRole, setStakeholderRole] = useState("");
 
   const updateTierMutation = useMutation({
     mutationFn: async (tierId: string) => {
@@ -162,6 +186,93 @@ export default function PlatformDetailPage() {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     },
   });
+
+  const addStakeholderMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/platforms/${id}/stakeholders`, {
+        name: stakeholderName,
+        email: stakeholderEmail,
+        role: stakeholderRole || null,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Stakeholder Added" });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "stakeholders"] });
+      setAddStakeholderOpen(false);
+      setStakeholderName("");
+      setStakeholderEmail("");
+      setStakeholderRole("");
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const removeStakeholderMutation = useMutation({
+    mutationFn: async (stakeholderId: string) => {
+      await apiRequest("DELETE", `/api/platforms/${id}/stakeholders/${stakeholderId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "stakeholders"] });
+    },
+  });
+
+  const uploadPlatformFileMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/platforms/${id}/attachments`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "File Uploaded" });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "attachments"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deletePlatformFileMutation = useMutation({
+    mutationFn: async (attachmentId: string) => {
+      await apiRequest("DELETE", `/api/platform-attachments/${attachmentId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "attachments"] });
+    },
+  });
+
+  const createAlertMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/platforms/${id}/alerts`, { alertDaysBefore: 30 });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Expiration Alert Enabled", description: "An alert will be sent 30 days before the contract expires." });
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "alerts"] });
+    },
+  });
+
+  const deleteAlertMutation = useMutation({
+    mutationFn: async (alertId: string) => {
+      await apiRequest("DELETE", `/api/alerts/${alertId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/platforms", id, "alerts"] });
+    },
+  });
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
 
   const formatDate = (date: string | Date | null) => {
     if (!date) return "N/A";
@@ -380,7 +491,7 @@ export default function PlatformDetailPage() {
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label>Attribute Name *</Label>
-                        <Input value={newAttrName} onChange={e => setNewAttrName(e.target.value)} placeholder="e.g., Vendor, Contract Expiry" />
+                        <Input value={newAttrName} onChange={e => setNewAttrName(e.target.value)} placeholder="e.g., Vendor, Contract Expiration" />
                       </div>
                       <div className="space-y-2">
                         <Label>Data Type</Label>
@@ -612,6 +723,226 @@ export default function PlatformDetailPage() {
         </div>
 
         <div className="space-y-6">
+          {/* Key Stakeholders */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Key Stakeholders
+                </CardTitle>
+                {isAdmin && (
+                  <Dialog open={addStakeholderOpen} onOpenChange={setAddStakeholderOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <UserPlus className="h-4 w-4 mr-1" /> Add
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Add Stakeholder</DialogTitle>
+                        <DialogDescription>Add a key stakeholder who will receive notifications about this platform.</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Name *</Label>
+                          <Input value={stakeholderName} onChange={e => setStakeholderName(e.target.value)} placeholder="Full name" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Email *</Label>
+                          <Input type="email" value={stakeholderEmail} onChange={e => setStakeholderEmail(e.target.value)} placeholder="email@company.com" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Role</Label>
+                          <Select value={stakeholderRole} onValueChange={setStakeholderRole}>
+                            <SelectTrigger><SelectValue placeholder="Select role..." /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="owner">Owner</SelectItem>
+                              <SelectItem value="technical_lead">Technical Lead</SelectItem>
+                              <SelectItem value="business_sponsor">Business Sponsor</SelectItem>
+                              <SelectItem value="procurement">Procurement</SelectItem>
+                              <SelectItem value="security">Security</SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button onClick={() => addStakeholderMutation.mutate()} disabled={!stakeholderName || !stakeholderEmail || addStakeholderMutation.isPending} className="w-full">
+                          {addStakeholderMutation.isPending ? "Adding..." : "Add Stakeholder"}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {stakeholders && stakeholders.length > 0 ? (
+                <div className="space-y-2">
+                  {stakeholders.map(s => (
+                    <div key={s.id} className="flex items-center justify-between p-2 rounded-md border text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{s.name}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Mail className="h-3 w-3" />
+                          <span className="truncate">{s.email}</span>
+                        </div>
+                        {s.role && (
+                          <Badge variant="secondary" className="mt-1 text-[10px]">
+                            {s.role.replace(/_/g, " ")}
+                          </Badge>
+                        )}
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removeStakeholderMutation.mutate(s.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No stakeholders added yet.</p>
+              )}
+              {stakeholders && stakeholders.length > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-2">Source: manual entry. Google & Slack integrations coming soon.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Contract Expiration Alert */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Bell className="h-4 w-4" />
+                  Expiration Alert
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const dynAttrs = (platform.dynamicAttributes || {}) as Record<string, any>;
+                const contractDate = dynAttrs["Contract Expiration"];
+                if (!contractDate) {
+                  return <p className="text-sm text-muted-foreground">Set the "Contract Expiration" attribute to enable alerts.</p>;
+                }
+                const expiry = new Date(contractDate);
+                const now = new Date();
+                const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+                const hasAlert = alerts && alerts.length > 0;
+
+                return (
+                  <div className="space-y-3">
+                    <div className="p-2 rounded-md bg-muted/50 text-sm">
+                      <p className="text-xs text-muted-foreground">Contract expires</p>
+                      <p className="font-medium">{expiry.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
+                      <p className={`text-xs mt-1 ${daysLeft <= 30 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                        {daysLeft > 0 ? `${daysLeft} day${daysLeft !== 1 ? "s" : ""} remaining` : "Expired"}
+                      </p>
+                    </div>
+                    {hasAlert ? (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Bell className="h-3.5 w-3.5 text-primary" />
+                          <span>Alert: {alerts[0].alertDaysBefore} days before</span>
+                          {alerts[0].alertSent && (
+                            <Badge variant="secondary" className="text-[10px]">Sent</Badge>
+                          )}
+                        </div>
+                        {isAdmin && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => deleteAlertMutation.mutate(alerts[0].id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    ) : isAdmin ? (
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => createAlertMutation.mutate()}>
+                        <Bell className="h-3.5 w-3.5 mr-1" /> Enable 30-Day Alert
+                      </Button>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No alert configured.</p>
+                    )}
+                    {hasAlert && stakeholders && stakeholders.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Notifies: {stakeholders.map(s => s.name).join(", ")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Documents */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Paperclip className="h-4 w-4" />
+                  Documents
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {platformAttachments && platformAttachments.length > 0 ? (
+                <div className="space-y-2">
+                  {platformAttachments.map(a => (
+                    <div key={a.id} className="flex items-center justify-between p-2 rounded-md border text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate">{a.fileName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSize(a.fileSize)} &middot; {a.uploaderName} &middot; {formatDate(a.createdAt)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => window.open(`/api/platform-attachments/${a.id}/download`, "_blank")}>
+                          <Download className="h-3 w-3" />
+                        </Button>
+                        {(a.uploadedBy === user?.id || isAdmin) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                            onClick={() => deletePlatformFileMutation.mutate(a.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No documents uploaded yet.</p>
+              )}
+              <div className="mt-3">
+                <label>
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadPlatformFileMutation.mutate(file);
+                      e.target.value = "";
+                    }}
+                    disabled={uploadPlatformFileMutation.isPending}
+                  />
+                  <Button variant="outline" size="sm" className="w-full" asChild>
+                    <span>
+                      <Upload className="h-3.5 w-3.5 mr-1" />
+                      {uploadPlatformFileMutation.isPending ? "Uploading..." : "Upload Document"}
+                    </span>
+                  </Button>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+
           {linkedRequests && linkedRequests.length > 0 && (
             <Card>
               <CardHeader>

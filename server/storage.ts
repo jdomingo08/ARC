@@ -5,6 +5,7 @@ import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
   agentRunLogs, auditLogs, scanSchedules, requestComments, requestAttachments,
+  platformStakeholders, expirationAlerts, platformAttachments,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
@@ -17,6 +18,9 @@ import {
   type AuditLog, type InsertAuditLog,
   type RequestComment, type InsertRequestComment,
   type RequestAttachment, type InsertRequestAttachment,
+  type PlatformStakeholder, type InsertPlatformStakeholder,
+  type ExpirationAlert, type InsertExpirationAlert,
+  type PlatformAttachment, type InsertPlatformAttachment,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -79,6 +83,24 @@ export interface IStorage {
   getAttachmentsByRequest(requestId: string): Promise<RequestAttachment[]>;
   getAttachment(id: string): Promise<RequestAttachment | undefined>;
   deleteRequestAttachment(id: string): Promise<boolean>;
+
+  // Platform Stakeholders
+  createPlatformStakeholder(stakeholder: InsertPlatformStakeholder): Promise<PlatformStakeholder>;
+  getStakeholdersByPlatform(platformId: string): Promise<PlatformStakeholder[]>;
+  deletePlatformStakeholder(id: string): Promise<boolean>;
+
+  // Expiration Alerts
+  createExpirationAlert(alert: InsertExpirationAlert): Promise<ExpirationAlert>;
+  getExpirationAlertsByPlatform(platformId: string): Promise<ExpirationAlert[]>;
+  getAllExpirationAlerts(): Promise<ExpirationAlert[]>;
+  updateExpirationAlert(id: string, data: Partial<ExpirationAlert>): Promise<ExpirationAlert | undefined>;
+  deleteExpirationAlert(id: string): Promise<boolean>;
+
+  // Platform Attachments
+  createPlatformAttachment(attachment: InsertPlatformAttachment): Promise<PlatformAttachment>;
+  getAttachmentsByPlatform(platformId: string): Promise<PlatformAttachment[]>;
+  getPlatformAttachment(id: string): Promise<PlatformAttachment | undefined>;
+  deletePlatformAttachment(id: string): Promise<boolean>;
 
   seedData(): Promise<void>;
 }
@@ -324,6 +346,65 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
+  // Platform Stakeholders
+  async createPlatformStakeholder(stakeholder: InsertPlatformStakeholder): Promise<PlatformStakeholder> {
+    const [created] = await db.insert(platformStakeholders).values(stakeholder).returning();
+    return created;
+  }
+
+  async getStakeholdersByPlatform(platformId: string): Promise<PlatformStakeholder[]> {
+    return db.select().from(platformStakeholders).where(eq(platformStakeholders.platformId, platformId)).orderBy(platformStakeholders.name);
+  }
+
+  async deletePlatformStakeholder(id: string): Promise<boolean> {
+    const result = await db.delete(platformStakeholders).where(eq(platformStakeholders.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Expiration Alerts
+  async createExpirationAlert(alert: InsertExpirationAlert): Promise<ExpirationAlert> {
+    const [created] = await db.insert(expirationAlerts).values(alert).returning();
+    return created;
+  }
+
+  async getExpirationAlertsByPlatform(platformId: string): Promise<ExpirationAlert[]> {
+    return db.select().from(expirationAlerts).where(eq(expirationAlerts.platformId, platformId)).orderBy(desc(expirationAlerts.createdAt));
+  }
+
+  async getAllExpirationAlerts(): Promise<ExpirationAlert[]> {
+    return db.select().from(expirationAlerts).orderBy(desc(expirationAlerts.createdAt));
+  }
+
+  async updateExpirationAlert(id: string, data: Partial<ExpirationAlert>): Promise<ExpirationAlert | undefined> {
+    const [updated] = await db.update(expirationAlerts).set(data).where(eq(expirationAlerts.id, id)).returning();
+    return updated;
+  }
+
+  async deleteExpirationAlert(id: string): Promise<boolean> {
+    const result = await db.delete(expirationAlerts).where(eq(expirationAlerts.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Platform Attachments
+  async createPlatformAttachment(attachment: InsertPlatformAttachment): Promise<PlatformAttachment> {
+    const [created] = await db.insert(platformAttachments).values(attachment).returning();
+    return created;
+  }
+
+  async getAttachmentsByPlatform(platformId: string): Promise<PlatformAttachment[]> {
+    return db.select().from(platformAttachments).where(eq(platformAttachments.platformId, platformId)).orderBy(desc(platformAttachments.createdAt));
+  }
+
+  async getPlatformAttachment(id: string): Promise<PlatformAttachment | undefined> {
+    const [attachment] = await db.select().from(platformAttachments).where(eq(platformAttachments.id, id));
+    return attachment;
+  }
+
+  async deletePlatformAttachment(id: string): Promise<boolean> {
+    const result = await db.delete(platformAttachments).where(eq(platformAttachments.id, id)).returning();
+    return result.length > 0;
+  }
+
   async seedData(): Promise<void> {
     // Runtime migration: add logo_url column if missing
     await pool.query(`
@@ -541,7 +622,7 @@ export class DatabaseStorage implements IStorage {
     });
 
     await db.insert(platformAttributeDefinitions).values([
-      { name: "Contract Expiry", dataType: "date", required: false },
+      { name: "Contract Expiration", dataType: "date", required: false },
       { name: "Data Residency", dataType: "dropdown", options: ["US", "EU", "APAC", "Global"], required: false },
       { name: "SOC2 Certified", dataType: "boolean", required: false, defaultValue: "false" },
     ]);
