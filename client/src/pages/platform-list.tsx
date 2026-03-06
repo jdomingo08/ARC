@@ -17,7 +17,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers, Settings2, ImageIcon } from "lucide-react";
+import { Server, Search, ArrowRight, DollarSign, Calendar, LayoutGrid, List, ArrowUpDown, ChevronUp, ChevronDown, Plus, Trash2, Layers, Settings2, ImageIcon, Hash } from "lucide-react";
 import type { Platform, Tier } from "@shared/schema";
 
 function PlatformLogo({ platform, size = 20 }: { platform: Platform; size?: number }) {
@@ -446,6 +446,42 @@ export default function PlatformListPage() {
           </Dialog>
         )}
       </div>
+
+      {/* Inventory Summary */}
+      {platforms && platforms.length > 0 && (() => {
+        const totalCost = platforms.reduce((sum, p) => sum + Number(p.annualCost || 0), 0);
+        const tierBreakdown = new Map<string, { count: number; cost: number }>();
+        for (const p of platforms) {
+          const tierName = getTierName(p.tierId) || "Unassigned";
+          const existing = tierBreakdown.get(tierName) || { count: 0, cost: 0 };
+          existing.count++;
+          existing.cost += Number(p.annualCost || 0);
+          tierBreakdown.set(tierName, existing);
+        }
+        return (
+          <div className="flex flex-wrap gap-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border bg-card text-sm">
+              <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Platforms:</span>
+              <span className="font-semibold">{platforms.length}</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border bg-card text-sm">
+              <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Total Annual Cost:</span>
+              <span className="font-semibold">${totalCost.toLocaleString()}</span>
+            </div>
+            {Array.from(tierBreakdown.entries()).map(([tier, data]) => (
+              <div key={tier} className="flex items-center gap-2 px-3 py-1.5 rounded-md border bg-card text-sm">
+                <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">{tier}:</span>
+                <span className="font-medium">{data.count}</span>
+                <span className="text-muted-foreground">·</span>
+                <span className="font-medium">${data.cost.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px] max-w-sm">

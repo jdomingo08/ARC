@@ -9,7 +9,7 @@ import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
 import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
-import type { User } from "@shared/schema";
+import type { User, PlatformAttributeDefinition } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -848,6 +848,216 @@ export async function registerRoutes(
       }
 
       await storage.deleteRequestAttachment(req.params.id);
+      res.json({ message: "Attachment deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Platform Stakeholders ---
+  app.get("/api/platforms/:id/stakeholders", requireAuth, async (req, res) => {
+    try {
+      const stakeholders = await storage.getStakeholdersByPlatform(req.params.id);
+      res.json(stakeholders);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/platforms/:id/stakeholders", requireAuth, requireRole("admin", "chair", "reviewer"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const platform = await storage.getPlatform(req.params.id);
+      if (!platform) return res.status(404).json({ message: "Platform not found" });
+
+      const { name, email, role } = req.body;
+      if (!name || !email) return res.status(400).json({ message: "Name and email are required" });
+
+      const stakeholder = await storage.createPlatformStakeholder({
+        platformId: req.params.id,
+        name,
+        email,
+        role: role || null,
+        source: "manual",
+        sourceId: null,
+        addedBy: user.id,
+      });
+      res.json(stakeholder);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/platforms/:platformId/stakeholders/:id", requireAuth, requireRole("admin", "chair", "reviewer"), async (req, res) => {
+    try {
+      const deleted = await storage.deletePlatformStakeholder(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Stakeholder not found" });
+      res.json({ message: "Stakeholder removed" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Expiration Alerts ---
+  app.get("/api/platforms/:id/alerts", requireAuth, async (req, res) => {
+    try {
+      const alerts = await storage.getExpirationAlertsByPlatform(req.params.id);
+      res.json(alerts);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/platforms/:id/alerts", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const platform = await storage.getPlatform(req.params.id);
+      if (!platform) return res.status(404).json({ message: "Platform not found" });
+
+      const { alertDaysBefore } = req.body;
+      const alert = await storage.createExpirationAlert({
+        platformId: req.params.id,
+        alertDaysBefore: alertDaysBefore || 30,
+      });
+      res.json(alert);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/alerts/:id", requireAuth, requireRole("admin", "chair"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteExpirationAlert(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Alert not found" });
+      res.json({ message: "Alert deleted" });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Check expiration alerts — returns platforms expiring soon and sends notifications
+  app.post("/api/alerts/check", requireAuth, requireRole("admin", "chair"), async (_req, res) => {
+    try {
+      const allPlatforms = await storage.getAllPlatforms();
+      const allAlerts = await storage.getAllExpirationAlerts();
+      const attrDefs = await storage.getAllAttributeDefinitions();
+      const contractAttr = attrDefs.find((a: PlatformAttributeDefinition) => a.name === "Contract Expiration");
+
+      if (!contractAttr) {
+        return res.json({ message: "No 'Contract Expiration' attribute defined", notifications: [] });
+      }
+
+      const notifications: any[] = [];
+      const now = new Date();
+
+      for (const platform of allPlatforms) {
+        const dynAttrs = (platform.dynamicAttributes || {}) as Record<string, any>;
+        const expiryDate = dynAttrs["Contract Expiration"];
+        if (!expiryDate) continue;
+
+        const expiry = new Date(expiryDate);
+        if (isNaN(expiry.getTime())) continue;
+
+        // Find alert config for this platform, or use default 30 days
+        const alertConfig = allAlerts.find(a => a.platformId === platform.id);
+        const daysBefore = alertConfig?.alertDaysBefore || 30;
+
+        const alertDate = new Date(expiry);
+        alertDate.setDate(alertDate.getDate() - daysBefore);
+
+        if (now >= alertDate && now < expiry) {
+          // Already sent?
+          if (alertConfig?.alertSent) continue;
+
+          const stakeholders = await storage.getStakeholdersByPlatform(platform.id);
+          const daysUntilExpiry = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+          const notification = {
+            platformId: platform.id,
+            platformName: platform.toolName,
+            expirationDate: expiryDate,
+            daysUntilExpiry,
+            stakeholders: stakeholders.map(s => ({ name: s.name, email: s.email })),
+            message: `The platform "${platform.toolName}" contract is set to expire on ${new Date(expiryDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. ${daysUntilExpiry} day(s) remaining.`,
+          };
+          notifications.push(notification);
+
+          // Mark alert as sent if config exists
+          if (alertConfig) {
+            await storage.updateExpirationAlert(alertConfig.id, { alertSent: true, alertSentAt: new Date() });
+          }
+        }
+      }
+
+      res.json({ notifications, checked: allPlatforms.length });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Platform Attachments ---
+  app.get("/api/platforms/:id/attachments", requireAuth, async (req, res) => {
+    try {
+      const attachments = await storage.getAttachmentsByPlatform(req.params.id);
+      res.json(attachments);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/platforms/:id/attachments", requireAuth, upload.single("file"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const platform = await storage.getPlatform(req.params.id);
+      if (!platform) return res.status(404).json({ message: "Platform not found" });
+
+      const file = req.file;
+      if (!file) return res.status(400).json({ message: "No file uploaded" });
+
+      const attachment = await storage.createPlatformAttachment({
+        platformId: req.params.id,
+        uploadedBy: user.id,
+        uploaderName: user.name,
+        fileName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype || null,
+        storagePath: file.path,
+      });
+      res.json(attachment);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/platform-attachments/:id/download", requireAuth, async (req, res) => {
+    try {
+      const attachment = await storage.getPlatformAttachment(req.params.id);
+      if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+
+      if (!fs.existsSync(attachment.storagePath)) {
+        return res.status(404).json({ message: "File not found on disk" });
+      }
+
+      res.download(attachment.storagePath, attachment.fileName);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/platform-attachments/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const attachment = await storage.getPlatformAttachment(req.params.id);
+      if (!attachment) return res.status(404).json({ message: "Attachment not found" });
+
+      if (attachment.uploadedBy !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "You can only delete your own uploads" });
+      }
+
+      if (fs.existsSync(attachment.storagePath)) {
+        fs.unlinkSync(attachment.storagePath);
+      }
+
+      await storage.deletePlatformAttachment(req.params.id);
       res.json({ message: "Attachment deleted" });
     } catch (e: any) {
       res.status(500).json({ message: e.message });

@@ -207,6 +207,39 @@ export const requestAttachments = pgTable("request_attachments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const platformStakeholders = pgTable("platform_stakeholders", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  platformId: varchar("platform_id", { length: 36 }).notNull(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  role: text("role"), // e.g., "owner", "technical_lead", "business_sponsor"
+  source: text("source").notNull().default("manual"), // "manual" | "google" | "slack" — extensible for future integrations
+  sourceId: text("source_id"), // external ID from Google/Slack when integrated
+  addedBy: varchar("added_by", { length: 36 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const expirationAlerts = pgTable("expiration_alerts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  platformId: varchar("platform_id", { length: 36 }).notNull(),
+  alertDaysBefore: integer("alert_days_before").notNull().default(30),
+  alertSent: boolean("alert_sent").default(false).notNull(),
+  alertSentAt: timestamp("alert_sent_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const platformAttachments = pgTable("platform_attachments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  platformId: varchar("platform_id", { length: 36 }).notNull(),
+  uploadedBy: varchar("uploaded_by", { length: 36 }).notNull(),
+  uploaderName: text("uploader_name").notNull(),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size").notNull(),
+  mimeType: text("mime_type"),
+  storagePath: text("storage_path").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
 export const insertReviewDecisionSchema = createInsertSchema(reviewDecisions).omit({ id: true, createdAt: true, superseded: true });
@@ -219,6 +252,9 @@ export const insertScanScheduleSchema = createInsertSchema(scanSchedules).omit({
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, timestamp: true });
 export const insertRequestCommentSchema = createInsertSchema(requestComments).omit({ id: true, createdAt: true });
 export const insertRequestAttachmentSchema = createInsertSchema(requestAttachments).omit({ id: true, createdAt: true });
+export const insertPlatformStakeholderSchema = createInsertSchema(platformStakeholders).omit({ id: true, createdAt: true });
+export const insertExpirationAlertSchema = createInsertSchema(expirationAlerts).omit({ id: true, createdAt: true });
+export const insertPlatformAttachmentSchema = createInsertSchema(platformAttachments).omit({ id: true, createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -244,3 +280,9 @@ export type RequestComment = typeof requestComments.$inferSelect;
 export type InsertRequestComment = z.infer<typeof insertRequestCommentSchema>;
 export type RequestAttachment = typeof requestAttachments.$inferSelect;
 export type InsertRequestAttachment = z.infer<typeof insertRequestAttachmentSchema>;
+export type PlatformStakeholder = typeof platformStakeholders.$inferSelect;
+export type InsertPlatformStakeholder = z.infer<typeof insertPlatformStakeholderSchema>;
+export type ExpirationAlert = typeof expirationAlerts.$inferSelect;
+export type InsertExpirationAlert = z.infer<typeof insertExpirationAlertSchema>;
+export type PlatformAttachment = typeof platformAttachments.$inferSelect;
+export type InsertPlatformAttachment = z.infer<typeof insertPlatformAttachmentSchema>;
