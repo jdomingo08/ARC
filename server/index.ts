@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { execSync } from "child_process";
 import { RiskScheduler } from "./risk-agent/scheduler";
 import { AlertScheduler } from "./alert-scheduler";
 import { storage } from "./storage";
@@ -122,31 +123,18 @@ app.use((req, res, next) => {
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
 
-  const startServer = (retries = 5) => {
-    httpServer.listen(
-      {
-        port,
-        host: "0.0.0.0",
-        reusePort: true,
-      },
-      () => {
-        log(`serving on port ${port}`);
-      },
-    );
+  try {
+    execSync(`fuser -k ${port}/tcp 2>/dev/null || true`);
+  } catch {}
 
-    httpServer.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE" && retries > 0) {
-        log(`Port ${port} in use, retrying in 2s... (${retries} retries left)`);
-        setTimeout(() => {
-          httpServer.close();
-          startServer(retries - 1);
-        }, 2000);
-      } else {
-        console.error(err);
-        process.exit(1);
-      }
-    });
-  };
-
-  startServer();
+  httpServer.listen(
+    {
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    },
+    () => {
+      log(`serving on port ${port}`);
+    },
+  );
 })();
