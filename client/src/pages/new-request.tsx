@@ -118,40 +118,44 @@ export default function NewRequestPage() {
         <p className="text-muted-foreground mt-1">Submit a request for AI tool evaluation and approval</p>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Left Panel - AI Insights Feed */}
-        <div className="w-full lg:w-[340px] shrink-0">
-          <div className="w-full border rounded-lg bg-card shadow-sm overflow-hidden flex flex-col lg:sticky lg:top-4 min-h-[400px]" style={{ maxHeight: "calc(100vh - 180px)" }}>
-            <ToolInsightsFeed toolName={formData.toolName} />
+      <div className="space-y-4">
+        {/* Step Progress */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">Step {step + 1} of {sections.length}</span>
+            <span className="text-muted-foreground">{sections[step].title}</span>
           </div>
+          <Progress value={progress} className="h-2" data-testid="progress-form" />
         </div>
 
-        {/* Right Panel - Form */}
-        <div className="flex-1 min-w-0 space-y-6">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Step {step + 1} of {sections.length}</span>
-              <span className="text-muted-foreground">{sections[step].title}</span>
+        {/* Step Tabs */}
+        <div className="flex gap-2 flex-wrap">
+          {sections.map((s, i) => (
+            <Button
+              key={i}
+              variant={i === step ? "default" : i < step ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => i <= step && setStep(i)}
+              disabled={i > step}
+              data-testid={`button-step-${i}`}
+            >
+              <s.icon className="h-3 w-3 mr-1" />
+              {s.title}
+            </Button>
+          ))}
+        </div>
+
+        {/* Inline Row: AI Insights + Form Card */}
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          {/* AI Insights Feed */}
+          <div className="w-full lg:w-[300px] shrink-0">
+            <div className="border rounded-lg bg-card shadow-sm overflow-hidden lg:sticky lg:top-4">
+              <ToolInsightsFeed toolName={formData.toolName} />
             </div>
-            <Progress value={progress} className="h-2" data-testid="progress-form" />
           </div>
 
-          <div className="flex gap-2 flex-wrap">
-            {sections.map((s, i) => (
-              <Button
-                key={i}
-                variant={i === step ? "default" : i < step ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => i <= step && setStep(i)}
-                disabled={i > step}
-                data-testid={`button-step-${i}`}
-              >
-                <s.icon className="h-3 w-3 mr-1" />
-                {s.title}
-              </Button>
-            ))}
-          </div>
-
+          {/* Form Card */}
+          <div className="flex-1 min-w-0">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -315,7 +319,7 @@ export default function NewRequestPage() {
             </CardContent>
           </Card>
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 mt-4">
             <Button variant="outline" onClick={() => setStep(s => s - 1)} disabled={step === 0} data-testid="button-prev-step">
               <ChevronLeft className="h-4 w-4 mr-1" /> Previous
             </Button>
@@ -330,6 +334,7 @@ export default function NewRequestPage() {
                 {submitMutation.isPending ? "Submitting..." : "Submit Request"}
               </Button>
             )}
+          </div>
           </div>
         </div>
       </div>
