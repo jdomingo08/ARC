@@ -1,10 +1,12 @@
 import type { Express, Request as ExpReq, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import session from "express-session";
+import passport from "passport";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { storage } from "./storage";
+import { configurePassport } from "./auth";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
 import { getLogoUrl } from "./logo-resolver";
@@ -53,9 +55,27 @@ export async function registerRoutes(
       secret: process.env.SESSION_SECRET || "arc-intelligence-dev-secret",
       resave: false,
       saveUninitialized: false,
-      cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 },
+      cookie: {
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+      },
     })
   );
+
+  // Initialize Passport for Google SSO
+  configurePassport();
+  app.use(passport.initialize());
+  app.use(passport.session());
+
+  // Bridge: sync passport's req.user into req.session.userId so existing
+  // requireAuth / requireRole middleware works unchanged for both login methods
+  app.use((req: ExpReq, _res: Response, next: NextFunction) => {
+    if (req.user && !req.session.userId) {
+      req.session.userId = (req.user as User).id;
+    }
+    next();
+  });
 
   await storage.seedData();
 
@@ -87,8 +107,40 @@ export async function registerRoutes(
   });
 
   app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy(() => {
-      res.json({ message: "Logged out" });
+    req.logout(() => {
+      req.session.destroy(() => {
+        res.json({ message: "Logged out" });
+      });
+    });
+  });
+
+  // Google SSO routes (only active when credentials are configured)
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    app.get(
+      "/api/auth/google",
+      passport.authenticate("google", {
+        scope: ["email", "profile"],
+        hd: process.env.GOOGLE_ALLOWED_DOMAIN, // hint to show only Workspace accounts
+      } as any)
+    );
+
+    app.get(
+      "/api/auth/google/callback",
+      passport.authenticate("google", { failureRedirect: "/login?error=auth_failed" }),
+      (req: ExpReq, res: Response) => {
+        if (req.user) {
+          req.session.userId = (req.user as User).id;
+        }
+        res.redirect("/");
+      }
+    );
+  }
+
+  // Tell the frontend which auth providers are available
+  app.get("/api/auth/providers", (_req, res) => {
+    res.json({
+      google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      emailClick: process.env.NODE_ENV !== "production",
     });
   });
 
