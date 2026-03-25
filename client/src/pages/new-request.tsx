@@ -59,6 +59,8 @@ const defaultFormData = {
   costStructure: "",
   annualCost: "",
   costNotes: "",
+  budgetOwner: "",
+  costCenter: "",
   dataInput: [] as string[],
   dataInputNotes: "",
   dataTraining: "unsure",
@@ -123,6 +125,8 @@ export default function NewRequestPage() {
         costStructure: existingDraft.costStructure || "",
         annualCost: existingDraft.annualCost?.toString() || "",
         costNotes: (existingDraft as any).costNotes || "",
+        budgetOwner: (existingDraft as any).budgetOwner || "",
+        costCenter: (existingDraft as any).costCenter || "",
         dataInput: existingDraft.dataInput || [],
         dataInputNotes: existingDraft.dataInputNotes || "",
         dataTraining: existingDraft.dataTraining || "unsure",
@@ -538,6 +542,18 @@ export default function NewRequestPage() {
                   <div className="space-y-2">
                     <Label htmlFor="costNotes">Additional Cost Details</Label>
                     <Textarea id="costNotes" value={formData.costNotes} onChange={e => updateField("costNotes", e.target.value)} placeholder="Describe any other cost structure or estimates that cannot be captured above (e.g., usage-based pricing, tiered plans, implementation fees)" data-testid="input-cost-notes" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="budgetOwner">Budget Owner</Label>
+                      <p className="text-xs text-muted-foreground">Who owns this budget line after approval?</p>
+                      <Input id="budgetOwner" value={formData.budgetOwner} onChange={e => updateField("budgetOwner", e.target.value)} placeholder="e.g., John Smith" data-testid="input-budget-owner" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="costCenter">Cost Center</Label>
+                      <p className="text-xs text-muted-foreground">Where should this cost be charged/allocated?</p>
+                      <Input id="costCenter" value={formData.costCenter} onChange={e => updateField("costCenter", e.target.value)} placeholder="e.g., CC-4500 Marketing" data-testid="input-cost-center" />
+                    </div>
                   </div>
                 </>
               )}
