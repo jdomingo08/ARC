@@ -49,6 +49,7 @@ const defaultFormData = {
   trainingPlan: "",
   trainingPlanDetails: "",
   aiPolicyAcknowledged: false,
+  useCaseType: "",
   workflowIntegration: "",
   alternativesChecked: false,
   alternativesText: "",
@@ -111,6 +112,7 @@ export default function NewRequestPage() {
         trainingPlan: (existingDraft as any).trainingPlan || "",
         trainingPlanDetails: (existingDraft as any).trainingPlanDetails || "",
         aiPolicyAcknowledged: (existingDraft as any).aiPolicyAcknowledged || false,
+        useCaseType: (existingDraft as any).useCaseType || "",
         workflowIntegration: existingDraft.workflowIntegration || "",
         alternativesChecked: existingDraft.alternativesChecked || false,
         alternativesText: existingDraft.alternativesText || "",
@@ -206,7 +208,8 @@ export default function NewRequestPage() {
       && (formData.toolCategory !== "other" || formData.toolCategoryOther)
       && formData.alreadyInUse && formData.authorizedRequestor
       && formData.trainingPlan && formData.aiPolicyAcknowledged
-      && formData.impactLevel && formData.dataInput.length > 0 && formData.loginMethod;
+      && formData.useCaseType && formData.impactLevel
+      && formData.dataInput.length > 0 && formData.loginMethod;
   };
 
   const submitMutation = useMutation({
@@ -464,8 +467,18 @@ export default function NewRequestPage() {
               {step === 1 && (
                 <>
                   <div className="space-y-2">
+                    <Label>Use Case Type *</Label>
+                    <RadioGroup value={formData.useCaseType} onValueChange={v => updateField("useCaseType", v)} data-testid="radio-use-case-type">
+                      <div className="flex items-center gap-2"><RadioGroupItem value="poc" id="uct-poc" /><Label htmlFor="uct-poc">POC (Proof of Concept)</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="pilot" id="uct-pilot" /><Label htmlFor="uct-pilot">Pilot</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="department_wide" id="uct-dept" /><Label htmlFor="uct-dept">Department-Wide</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="enterprise" id="uct-ent" /><Label htmlFor="uct-ent">Enterprise</Label></div>
+                    </RadioGroup>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="workflowIntegration">Workflow Integration</Label>
-                    <Textarea id="workflowIntegration" value={formData.workflowIntegration} onChange={e => updateField("workflowIntegration", e.target.value)} placeholder="How will this tool integrate into your current workflow?" data-testid="input-workflow" />
+                    <Textarea id="workflowIntegration" value={formData.workflowIntegration} onChange={e => updateField("workflowIntegration", e.target.value)} placeholder="How will this tool integrate into your current workflow? Why did you choose this tool, and how will it benefit you and your team?" data-testid="input-workflow" />
                   </div>
                   <div className="space-y-3">
                     <Label>Have you evaluated alternatives?</Label>
