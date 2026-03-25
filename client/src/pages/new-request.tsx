@@ -61,6 +61,7 @@ const defaultFormData = {
   costNotes: "",
   budgetOwner: "",
   costCenter: "",
+  tierAssignment: "",
   dataInput: [] as string[],
   dataInputNotes: "",
   dataTraining: "unsure",
@@ -127,6 +128,7 @@ export default function NewRequestPage() {
         costNotes: (existingDraft as any).costNotes || "",
         budgetOwner: (existingDraft as any).budgetOwner || "",
         costCenter: (existingDraft as any).costCenter || "",
+        tierAssignment: (existingDraft as any).tierAssignment || "",
         dataInput: existingDraft.dataInput || [],
         dataInputNotes: existingDraft.dataInputNotes || "",
         dataTraining: existingDraft.dataTraining || "unsure",
@@ -555,6 +557,31 @@ export default function NewRequestPage() {
                       <Input id="costCenter" value={formData.costCenter} onChange={e => updateField("costCenter", e.target.value)} placeholder="e.g., CC-4500 Marketing" data-testid="input-cost-center" />
                     </div>
                   </div>
+
+                  {/* Reviewer/Admin-only section */}
+                  {user && (user.role === "admin" || user.role === "reviewer" || user.role === "chair") && (
+                    <>
+                      <div className="border-t my-4" />
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Reviewer / Admin Only</p>
+                          <p className="text-xs text-amber-600 dark:text-amber-400">This section is not visible to requesters</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="tierAssignment">Tier Assignment</Label>
+                          <Select value={formData.tierAssignment} onValueChange={v => updateField("tierAssignment", v)}>
+                            <SelectTrigger data-testid="select-tier-assignment" className="bg-white dark:bg-background"><SelectValue placeholder="Select tier" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="tier_0">Tier 0</SelectItem>
+                              <SelectItem value="tier_1">Tier 1</SelectItem>
+                              <SelectItem value="tier_2">Tier 2</SelectItem>
+                              <SelectItem value="tier_3">Tier 3</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
 

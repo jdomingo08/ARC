@@ -679,6 +679,7 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS cost_notes TEXT;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS budget_owner TEXT;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS cost_center TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS tier_assignment TEXT;
     `).catch(() => { /* columns may already exist */ });
 
     // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"

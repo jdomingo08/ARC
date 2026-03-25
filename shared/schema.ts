@@ -89,6 +89,7 @@ export const requests = pgTable("requests", {
   costNotes: text("cost_notes"),
   budgetOwner: text("budget_owner"),
   costCenter: text("cost_center"),
+  tierAssignment: text("tier_assignment"),
   useCaseType: text("use_case_type"),
   platformId: varchar("platform_id", { length: 36 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
