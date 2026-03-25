@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Shield, Loader2, CheckCircle2, AlertCircle, Send } from "lucide-react";
-import { vendorQuestions } from "@shared/vendor-questions";
+import { getFilteredQuestions } from "@shared/vendor-questions";
 
 export default function VendorFormPage() {
   const params = useParams<{ token: string }>();
@@ -56,7 +56,8 @@ export default function VendorFormPage() {
     }
   };
 
-  const answeredCount = Object.values(answers).filter(a => a.trim()).length;
+  const filteredIds = new Set(getFilteredQuestions(requestInfo?.division).map(q => q.id));
+  const answeredCount = Object.entries(answers).filter(([id, a]) => filteredIds.has(id) && a.trim()).length;
 
   if (loading) {
     return (
@@ -97,7 +98,7 @@ export default function VendorFormPage() {
     );
   }
 
-  const showEuAiAct = requestInfo?.division === "ats_international" || requestInfo?.division === "both";
+  const filtered = getFilteredQuestions(requestInfo?.division);
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
@@ -122,30 +123,24 @@ export default function VendorFormPage() {
 
         {/* Questions */}
         <div className="space-y-4">
-          {vendorQuestions.map((q, i) => {
-            if (q.id === "eu_ai_act" && !showEuAiAct) return null;
-            return (
-              <Card key={q.id}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-semibold">
-                    {i + 1}. {q.title}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-xs text-gray-600 leading-relaxed">{q.question}</p>
-                  {q.conditionalNote && (
-                    <p className="text-xs text-amber-600 italic">{q.conditionalNote}</p>
-                  )}
-                  <Textarea
-                    value={answers[q.id] || ""}
-                    onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                    placeholder="Enter your response..."
-                    rows={3}
-                  />
-                </CardContent>
-              </Card>
-            );
-          })}
+          {filtered.map((q, i) => (
+            <Card key={q.id}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold">
+                  {i + 1}. {q.title}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-gray-600 leading-relaxed">{q.question}</p>
+                <Textarea
+                  value={answers[q.id] || ""}
+                  onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                  placeholder="Enter your response..."
+                  rows={3}
+                />
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {/* Submit */}
@@ -153,7 +148,7 @@ export default function VendorFormPage() {
           <CardContent className="pt-6 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-600">
-                {answeredCount} of {vendorQuestions.length} questions answered
+                {answeredCount} of {filtered.length} questions answered
               </p>
               <Button onClick={handleSubmit} disabled={submitting || answeredCount === 0} size="lg">
                 {submitting ? (
