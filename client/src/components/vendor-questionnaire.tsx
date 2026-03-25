@@ -21,9 +21,10 @@ interface VendorQuestionnaireProps {
   vendorToken?: string | null;
   vendorCompleted?: boolean;
   division?: string;
+  onSaveDraft?: () => Promise<string | null>;
 }
 
-export function VendorQuestionnaire({ requestId, vendorToken, vendorCompleted, division }: VendorQuestionnaireProps) {
+export function VendorQuestionnaire({ requestId, vendorToken, vendorCompleted, division, onSaveDraft }: VendorQuestionnaireProps) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   const [generatedLink, setGeneratedLink] = useState(vendorToken || "");
@@ -81,8 +82,12 @@ ${filtered.map((q, i) => `
 
   const generateLinkMutation = useMutation({
     mutationFn: async () => {
-      if (!requestId) throw new Error("Save the request first");
-      const res = await apiRequest("POST", `/api/requests/${requestId}/vendor-link`, { division });
+      let id = requestId;
+      if (!id && onSaveDraft) {
+        id = await onSaveDraft();
+      }
+      if (!id) throw new Error("Please fill in some fields and save the draft first.");
+      const res = await apiRequest("POST", `/api/requests/${id}/vendor-link`, { division });
       return res.json();
     },
     onSuccess: (data) => {
@@ -146,7 +151,7 @@ ${filtered.map((q, i) => `
             <Button
               size="sm"
               onClick={() => generateLinkMutation.mutate()}
-              disabled={generateLinkMutation.isPending || !requestId}
+              disabled={generateLinkMutation.isPending}
             >
               {generateLinkMutation.isPending ? (
                 <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Generating...</>
@@ -170,9 +175,6 @@ ${filtered.map((q, i) => `
             </div>
           )}
 
-          {!requestId && (
-            <p className="text-xs text-amber-600">Save as draft first to generate a vendor link.</p>
-          )}
         </div>
 
         {/* Questions preview (collapsed) */}

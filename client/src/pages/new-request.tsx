@@ -198,6 +198,27 @@ export default function NewRequestPage() {
     saveDraft(formData, draftId);
   };
 
+  // Save draft and return the ID (for vendor link generation)
+  const saveDraftAndReturnId = useCallback(async (): Promise<string | null> => {
+    if (draftId) return draftId;
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    try {
+      const payload = {
+        ...formDataRef.current,
+        estimatedUsersCount: formDataRef.current.estimatedUsersCount ? parseInt(formDataRef.current.estimatedUsersCount) : null,
+        annualCost: formDataRef.current.annualCost || null,
+      };
+      const res = await apiRequest("POST", "/api/requests/draft", payload);
+      const saved = await res.json();
+      setDraftId(saved.id);
+      window.history.replaceState(null, "", `/requests/new?draft=${saved.id}`);
+      setLastSaved(new Date());
+      return saved.id;
+    } catch {
+      return null;
+    }
+  }, [draftId]);
+
   // Clean up auto-save timer on unmount
   useEffect(() => {
     return () => {
@@ -603,6 +624,7 @@ export default function NewRequestPage() {
                     vendorToken={(existingDraft as any)?.vendorQuestionnaireToken}
                     vendorCompleted={(existingDraft as any)?.vendorQuestionnaireCompleted}
                     division={formData.division}
+                    onSaveDraft={saveDraftAndReturnId}
                   />
                 </>
               )}
