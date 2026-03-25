@@ -86,6 +86,7 @@ export const requests = pgTable("requests", {
   trainingPlan: text("training_plan"),
   trainingPlanDetails: text("training_plan_details"),
   aiPolicyAcknowledged: boolean("ai_policy_acknowledged").default(false),
+  costNotes: text("cost_notes"),
   useCaseType: text("use_case_type"),
   platformId: varchar("platform_id", { length: 36 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),

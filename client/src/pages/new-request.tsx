@@ -58,6 +58,7 @@ const defaultFormData = {
   compatibilityNotes: "",
   costStructure: "",
   annualCost: "",
+  costNotes: "",
   dataInput: [] as string[],
   dataInputNotes: "",
   dataTraining: "unsure",
@@ -121,6 +122,7 @@ export default function NewRequestPage() {
         compatibilityNotes: existingDraft.compatibilityNotes || "",
         costStructure: existingDraft.costStructure || "",
         annualCost: existingDraft.annualCost?.toString() || "",
+        costNotes: (existingDraft as any).costNotes || "",
         dataInput: existingDraft.dataInput || [],
         dataInputNotes: existingDraft.dataInputNotes || "",
         dataTraining: existingDraft.dataTraining || "unsure",
@@ -513,16 +515,9 @@ export default function NewRequestPage() {
               {step === 2 && (
                 <>
                   <div className="space-y-2">
-                    <Label>Platform Compatibility</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {["outlook", "crm", "internal_dbs", "other"].map(c => (
-                        <div key={c} className="flex items-center gap-2">
-                          <Checkbox checked={formData.compatibility.includes(c)} onCheckedChange={() => toggleArrayField("compatibility", c)} id={`compat-${c}`} data-testid={`checkbox-compat-${c}`} />
-                          <Label htmlFor={`compat-${c}`}>{c === "internal_dbs" ? "Internal DBs" : c === "crm" ? "CRM" : c.charAt(0).toUpperCase() + c.slice(1)}</Label>
-                        </div>
-                      ))}
-                    </div>
-                    <Textarea value={formData.compatibilityNotes} onChange={e => updateField("compatibilityNotes", e.target.value)} placeholder="Additional compatibility notes" data-testid="input-compat-notes" />
+                    <Label htmlFor="compatibilityNotes">Integration Requirements</Label>
+                    <p className="text-xs text-muted-foreground">Does this tool need to work alongside other platforms or systems? Please describe.</p>
+                    <Textarea id="compatibilityNotes" value={formData.compatibilityNotes} onChange={e => updateField("compatibilityNotes", e.target.value)} placeholder="Are there any platforms or systems that need to integrate with this tool?" data-testid="input-compat-notes" />
                   </div>
                   <div className="space-y-2">
                     <Label>Cost Structure</Label>
@@ -539,6 +534,10 @@ export default function NewRequestPage() {
                   <div className="space-y-2">
                     <Label htmlFor="annualCost">Total Estimated Annual Cost ($)</Label>
                     <Input id="annualCost" type="number" min="0" step="0.01" value={formData.annualCost} onChange={e => updateField("annualCost", e.target.value)} placeholder="0.00" data-testid="input-annual-cost" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="costNotes">Additional Cost Details</Label>
+                    <Textarea id="costNotes" value={formData.costNotes} onChange={e => updateField("costNotes", e.target.value)} placeholder="Describe any other cost structure or estimates that cannot be captured above (e.g., usage-based pricing, tiered plans, implementation fees)" data-testid="input-cost-notes" />
                   </div>
                 </>
               )}
