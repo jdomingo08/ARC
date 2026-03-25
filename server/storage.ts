@@ -448,14 +448,10 @@ export class DatabaseStorage implements IStorage {
     if (existingUsers.length > 0) return;
 
     const seedUsers: InsertUser[] = [
-      { name: "Jeff DeMartino", email: "jeff@arc.io", department: "Executive", role: "chair", reviewerRole: "chair" },
-      { name: "Kirun Amiri", email: "kirun@arc.io", department: "IT Governance", role: "chair", reviewerRole: "chair" },
-      { name: "LeaAnna Hernandez", email: "leaanna@arc.io", department: "AI Strategy", role: "reviewer", reviewerRole: "strategic" },
-      { name: "Josh Silva", email: "josh@arc.io", department: "Cyber Security", role: "reviewer", reviewerRole: "security" },
-      { name: "Jorge Domingo", email: "jorge@arc.io", department: "Technology", role: "reviewer", reviewerRole: "technical_financial" },
-      { name: "Sarah Chen", email: "sarah@arc.io", department: "Marketing", role: "requester" },
-      { name: "Mike Thompson", email: "mike@arc.io", department: "Engineering", role: "requester" },
-      { name: "Admin User", email: "admin@arc.io", department: "IT", role: "admin" },
+      { name: "LeaAnna Hernandez", email: "leaanna.hernandez@entravision.com", department: "AI Strategy", role: "chair", reviewerRole: "strategic" },
+      { name: "Kirun Amiri", email: "kirun.amiri@entravision.com", department: "IT Governance", role: "reviewer", reviewerRole: "chair" },
+      { name: "Josh Silva", email: "josh.silva@entravision.com", department: "Cyber Security", role: "reviewer", reviewerRole: "security" },
+      { name: "Jorge Domingo", email: "jorge.domingo@entravision.com", department: "Technology", role: "admin", reviewerRole: "technical_financial" },
     ];
 
     const createdUsers: User[] = [];
@@ -485,12 +481,10 @@ export class DatabaseStorage implements IStorage {
       requiredControls: ["SSO", "Contract", "DPA"],
     }).returning();
 
-    const sarah = createdUsers.find(u => u.email === "sarah@arc.io")!;
-    const mike = createdUsers.find(u => u.email === "mike@arc.io")!;
-    const josh = createdUsers.find(u => u.email === "josh@arc.io")!;
-    const jorge = createdUsers.find(u => u.email === "jorge@arc.io")!;
-    const jeff = createdUsers.find(u => u.email === "jeff@arc.io")!;
-    const kirun = createdUsers.find(u => u.email === "kirun@arc.io")!;
+    const leaanna = createdUsers.find(u => u.email === "leaanna.hernandez@entravision.com")!;
+    const kirun = createdUsers.find(u => u.email === "kirun.amiri@entravision.com")!;
+    const josh = createdUsers.find(u => u.email === "josh.silva@entravision.com")!;
+    const jorge = createdUsers.find(u => u.email === "jorge.domingo@entravision.com")!;
 
     const [platform1] = await db.insert(platforms).values({
       toolName: "ChatGPT Enterprise",
@@ -507,7 +501,7 @@ export class DatabaseStorage implements IStorage {
       loginMethod: "SSO",
       decisionSummary: "Approved for enterprise use with SSO. Training disabled. Contract signed.",
       approvalDate: new Date("2025-11-15"),
-      ownerId: mike.id,
+      ownerId: jorge.id,
       lastReviewedAt: new Date("2025-11-15"),
     }).returning();
 
@@ -523,7 +517,7 @@ export class DatabaseStorage implements IStorage {
       dataInput: ["public"],
       dataTraining: "unsure",
       loginMethod: "email_password",
-      ownerId: sarah.id,
+      ownerId: jorge.id,
     }).returning();
 
     const [platform3] = await db.insert(platforms).values({
@@ -562,11 +556,11 @@ export class DatabaseStorage implements IStorage {
 
     const [req1] = await db.insert(requests).values({
       trackingId: "ARC-001",
-      requesterId: mike.id,
+      requesterId: jorge.id,
       department: "Engineering",
       toolName: "ChatGPT Enterprise",
       status: "approved",
-      requesterName: "Mike Thompson",
+      requesterName: "Jorge Domingo",
       primaryGoal: "Code generation, documentation, and analysis assistance",
       estimatedUsers: "department",
       estimatedUsersCount: 45,
@@ -587,17 +581,17 @@ export class DatabaseStorage implements IStorage {
     await db.insert(reviewDecisions).values([
       { requestId: req1.id, reviewerRole: "security", reviewerId: josh.id, decision: "pass", rationale: "SSO enforced, training disabled, data handling compliant with policy.", riskNotes: "Monitor for any changes to OpenAI data processing terms." },
       { requestId: req1.id, reviewerRole: "technical_financial", reviewerId: jorge.id, decision: "pass", rationale: "API capabilities strong. Cost per seat reasonable for expected productivity gains. ROI estimated at 3x.", conditions: "Annual review of usage metrics required." },
-      { requestId: req1.id, reviewerRole: "chair", reviewerId: jeff.id, decision: "pass", rationale: "Aligns with digital transformation strategy. Approved for enterprise rollout." },
+      { requestId: req1.id, reviewerRole: "chair", reviewerId: leaanna.id, decision: "pass", rationale: "Aligns with digital transformation strategy. Approved for enterprise rollout." },
       { requestId: req1.id, reviewerRole: "chair", reviewerId: kirun.id, decision: "pass", rationale: "IT governance requirements met. SSO and audit logging confirmed." },
     ]);
 
     const [req2] = await db.insert(requests).values({
       trackingId: "ARC-002",
-      requesterId: sarah.id,
+      requesterId: kirun.id,
       department: "Marketing",
       toolName: "Jasper AI",
       status: "pending_reviews",
-      requesterName: "Sarah Chen",
+      requesterName: "Kirun Amiri",
       primaryGoal: "Marketing content creation and brand voice consistency",
       estimatedUsers: "team",
       estimatedUsersCount: 8,
@@ -615,7 +609,7 @@ export class DatabaseStorage implements IStorage {
     }).returning();
 
     await db.insert(reviewDecisions).values({
-      requestId: req2.id, reviewerRole: "strategic", reviewerId: createdUsers.find(u => u.email === "leaanna@arc.io")!.id, decision: "pass", rationale: "Good strategic fit for marketing team. Content automation aligns with Q1 goals.",
+      requestId: req2.id, reviewerRole: "strategic", reviewerId: leaanna.id, decision: "pass", rationale: "Good strategic fit for marketing team. Content automation aligns with Q1 goals.",
     });
 
     await db.insert(riskFindings).values([

@@ -40,8 +40,20 @@ export function configurePassport() {
               return done(null, false, { message: "Email domain not allowed" });
             }
 
-            // Must match an existing pre-seeded user
-            const user = await storage.getUserByEmail(email);
+            // Check for existing user first
+            let user = await storage.getUserByEmail(email);
+
+            // Auto-provision new users with allowed domain as requesters
+            if (!user && allowedDomain && email.endsWith(`@${allowedDomain}`)) {
+              const displayName = profile.displayName || email.split("@")[0];
+              user = await storage.createUser({
+                name: displayName,
+                email,
+                department: "General",
+                role: "requester",
+              });
+            }
+
             if (!user) {
               return done(null, false, { message: "No account for this email" });
             }
