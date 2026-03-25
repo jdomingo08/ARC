@@ -665,6 +665,18 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ALTER COLUMN estimated_users DROP NOT NULL;
     `).catch(() => { /* columns may already be nullable */ });
 
+    // Add new Basics section fields
+    await pool.query(`
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS division TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS tool_category TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS tool_category_other TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS already_in_use TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS authorized_requestor BOOLEAN DEFAULT FALSE;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS training_plan TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS training_plan_details TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS ai_policy_acknowledged BOOLEAN DEFAULT FALSE;
+    `).catch(() => { /* columns may already exist */ });
+
     // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"
     await db.execute(sql`
       UPDATE platform_attribute_definitions
