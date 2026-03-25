@@ -2,7 +2,7 @@ export interface VendorQuestion {
   id: string;
   title: string;
   question: string;
-  conditionalNote?: string;
+  conditional?: string;
 }
 
 export const vendorQuestions: VendorQuestion[] = [
@@ -30,7 +30,7 @@ export const vendorQuestions: VendorQuestion[] = [
     id: "eu_ai_act",
     title: "EU AI Act Classification",
     question: "Has your organization formally classified this product under the EU AI Act (Minimal Risk / Limited Risk / High Risk)? Provide your transparency statement or conformity documentation.",
-    conditionalNote: "Required for ATS International or Both division deployments.",
+    conditional: "ats_or_both",
   },
   {
     id: "ai_ethics",
@@ -94,17 +94,23 @@ export const vendorQuestions: VendorQuestion[] = [
   },
 ];
 
-export function formatQuestionsAsText(): string {
+export function getFilteredQuestions(division?: string): VendorQuestion[] {
+  const includeAts = division === "ats_international" || division === "both";
+  return vendorQuestions.filter(q => {
+    if (q.conditional === "ats_or_both" && !includeAts) return false;
+    return true;
+  });
+}
+
+export function formatQuestionsAsText(division?: string): string {
+  const questions = getFilteredQuestions(division);
   let text = "ENTRAVISION — VENDOR SECURITY QUESTIONNAIRE\n";
   text += "=============================================\n\n";
   text += "Please answer each question below. Provide as much detail as possible.\n\n";
 
-  vendorQuestions.forEach((q, i) => {
+  questions.forEach((q, i) => {
     text += `${i + 1}. ${q.title}\n`;
     text += `${q.question}\n`;
-    if (q.conditionalNote) {
-      text += `Note: ${q.conditionalNote}\n`;
-    }
     text += `\nAnswer:\n\n\n`;
   });
 

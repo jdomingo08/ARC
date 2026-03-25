@@ -14,7 +14,7 @@ import {
   ExternalLink,
   ShieldCheck,
 } from "lucide-react";
-import { vendorQuestions, formatQuestionsAsText } from "@shared/vendor-questions";
+import { vendorQuestions, formatQuestionsAsText, getFilteredQuestions } from "@shared/vendor-questions";
 
 interface VendorQuestionnaireProps {
   requestId?: string | null;
@@ -28,11 +28,13 @@ export function VendorQuestionnaire({ requestId, vendorToken, vendorCompleted, d
   const [copied, setCopied] = useState(false);
   const [generatedLink, setGeneratedLink] = useState(vendorToken || "");
 
+  const filtered = getFilteredQuestions(division);
+
   const handleCopy = async () => {
-    const text = formatQuestionsAsText();
+    const text = formatQuestionsAsText(division);
     await navigator.clipboard.writeText(text);
     setCopied(true);
-    toast({ title: "Copied!", description: "All 17 questions copied to clipboard." });
+    toast({ title: "Copied!", description: `${filtered.length} questions copied to clipboard.` });
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -59,7 +61,7 @@ export function VendorQuestionnaire({ requestId, vendorToken, vendorCompleted, d
   <h1>ENTRAVISION — VENDOR SECURITY QUESTIONNAIRE</h1>
   <p>Please complete all applicable questions and return this document to the requestor.</p>
 </div>
-${vendorQuestions.map((q, i) => `
+${filtered.map((q, i) => `
 <div class="question">
   <h3>${i + 1}. ${q.title}</h3>
   <p>${q.question}</p>
@@ -176,16 +178,13 @@ ${vendorQuestions.map((q, i) => `
         {/* Questions preview (collapsed) */}
         <details className="border rounded-lg">
           <summary className="px-3 py-2 text-sm font-medium cursor-pointer hover:bg-muted/50">
-            Preview all 17 questions
+            Preview all {filtered.length} questions
           </summary>
           <div className="px-3 pb-3 space-y-3">
-            {vendorQuestions.map((q, i) => (
+            {filtered.map((q, i) => (
               <div key={q.id} className="text-xs space-y-1">
                 <p className="font-semibold">{i + 1}. {q.title}</p>
                 <p className="text-muted-foreground">{q.question}</p>
-                {q.conditionalNote && (
-                  <p className="text-amber-600 italic text-[11px]">{q.conditionalNote}</p>
-                )}
               </div>
             ))}
           </div>
