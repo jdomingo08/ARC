@@ -227,11 +227,8 @@ export async function registerRoutes(
       const user = (req as any).user as User;
       const data = req.body;
 
-      if (!data.toolName || !data.primaryGoal || !data.impactLevel || !data.loginMethod) {
-        return res.status(400).json({ message: "Missing required fields: toolName, primaryGoal, impactLevel, loginMethod" });
-      }
-      if (!data.dataInput || !Array.isArray(data.dataInput) || data.dataInput.length === 0) {
-        return res.status(400).json({ message: "At least one data input category is required" });
+      if (!data.toolName || !data.primaryGoal || !data.impactLevel) {
+        return res.status(400).json({ message: "Missing required fields: toolName, primaryGoal, impactLevel" });
       }
 
       data.requesterId = user.id;
@@ -251,7 +248,7 @@ export async function registerRoutes(
           annualCost: data.annualCost || null,
           dataInput: data.dataInput || null,
           dataTraining: data.dataTraining || null,
-          loginMethod: data.loginMethod,
+          loginMethod: data.loginMethod || null,
           ownerId: user.id,
         });
       } else if (data.annualCost) {
@@ -1304,6 +1301,75 @@ export async function registerRoutes(
         activeRisks: allFindings.filter(f => f.classification === "high" || f.classification === "critical").length,
         recentRequests: allRequests.slice(0, 5),
       });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Vendor Questionnaire Endpoints ---
+
+  // Generate a vendor link for a request (authenticated)
+  app.post("/api/requests/:id/vendor-link", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (request.requesterId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Generate unique token
+      const token = `vq-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 10)}`;
+      await storage.updateRequest(request.id, {
+        vendorQuestionnaireToken: token,
+        vendorQuestionnaireCompleted: false,
+      } as any);
+
+      res.json({ token });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Public: Get vendor form info (no auth)
+  app.get("/api/vendor-form/:token", async (req, res) => {
+    try {
+      const allRequests = await storage.getAllRequests();
+      const request = allRequests.find((r: any) => r.vendorQuestionnaireToken === req.params.token);
+      if (!request) return res.status(404).json({ message: "Invalid or expired link" });
+
+      res.json({
+        toolName: request.toolName || "Unknown Tool",
+        requesterName: request.requesterName || "Unknown",
+        division: (request as any).division || "",
+        completed: (request as any).vendorQuestionnaireCompleted || false,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Public: Submit vendor form (no auth)
+  app.post("/api/vendor-form/:token", async (req, res) => {
+    try {
+      const allRequests = await storage.getAllRequests();
+      const request = allRequests.find((r: any) => r.vendorQuestionnaireToken === req.params.token);
+      if (!request) return res.status(404).json({ message: "Invalid or expired link" });
+      if ((request as any).vendorQuestionnaireCompleted) {
+        return res.status(400).json({ message: "This questionnaire has already been submitted" });
+      }
+
+      const { answers } = req.body;
+      if (!answers || typeof answers !== "object") {
+        return res.status(400).json({ message: "Answers are required" });
+      }
+
+      await storage.updateRequest(request.id, {
+        vendorQuestionnaireCompleted: true,
+        vendorQuestionnaireData: answers,
+      } as any);
+
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
