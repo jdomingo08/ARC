@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 
 const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  draft: { label: "Draft", variant: "outline" },
   pending_reviews: { label: "Pending Reviews", variant: "secondary" },
   waiting_on_requester: { label: "Waiting on Requester", variant: "outline" },
   approved: { label: "Approved", variant: "default" },

@@ -9,7 +9,7 @@ export type UserRole = z.infer<typeof userRoleEnum>;
 export const reviewerRoleEnum = z.enum(["security", "technical_financial", "strategic", "chair"]);
 export type ReviewerRole = z.infer<typeof reviewerRoleEnum>;
 
-export const requestStatusEnum = z.enum(["pending_reviews", "waiting_on_requester", "approved", "rejected"]);
+export const requestStatusEnum = z.enum(["draft", "pending_reviews", "waiting_on_requester", "approved", "rejected"]);
 export type RequestStatus = z.infer<typeof requestStatusEnum>;
 
 export const platformStatusEnum = z.enum(["on_review", "approved", "rejected", "retired"]);

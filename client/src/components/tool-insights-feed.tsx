@@ -178,7 +178,7 @@ export function ToolInsightsFeed({ toolName }: ToolInsightsFeedProps) {
   }
 
   return (
-    <div className="flex flex-col min-h-[350px]">
+    <div className="flex flex-col min-h-[350px] max-h-[calc(100vh-8rem)] overflow-hidden">
       {/* Header */}
       <div className="p-3 border-b bg-gradient-to-r from-primary/5 to-primary/10 shrink-0">
         <div className="flex items-center gap-2">

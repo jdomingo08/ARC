@@ -176,9 +176,47 @@ export async function registerRoutes(
       if (user.role === "requester") {
         reqs = await storage.getRequestsByRequester(user.id);
       } else {
-        reqs = await storage.getAllRequests();
+        // Non-requesters see all requests but only their own drafts
+        const all = await storage.getAllRequests();
+        reqs = all.filter(r => r.status !== "draft" || r.requesterId === user.id);
       }
       res.json(reqs);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Create or update a draft request (auto-save)
+  app.post("/api/requests/draft", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const data = req.body;
+      data.requesterId = user.id;
+      data.requesterName = data.requesterName || user.name;
+      data.department = data.department || user.department;
+
+      // If draftId is provided, update existing draft
+      if (data.draftId) {
+        const existing = await storage.getRequest(data.draftId);
+        if (!existing || existing.requesterId !== user.id || existing.status !== "draft") {
+          return res.status(404).json({ message: "Draft not found" });
+        }
+        const { draftId, ...updateData } = data;
+        const updated = await storage.updateRequest(existing.id, {
+          ...updateData,
+          estimatedUsersCount: data.estimatedUsersCount ? parseInt(data.estimatedUsersCount) : null,
+          annualCost: data.annualCost || null,
+        });
+        return res.json(updated);
+      }
+
+      // Create new draft
+      const request = await storage.createRequest({
+        ...data,
+        toolName: data.toolName || "Untitled",
+        status: "draft",
+      } as any);
+      res.json(request);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -224,6 +262,29 @@ export async function registerRoutes(
       }
 
       data.platformId = platform.id;
+
+      // If submitting from a draft, update the existing record
+      if (data.draftId) {
+        const existing = await storage.getRequest(data.draftId);
+        if (existing && existing.requesterId === user.id && existing.status === "draft") {
+          const { draftId, ...updateData } = data;
+          const updated = await storage.updateRequest(existing.id, {
+            ...updateData,
+            status: "pending_reviews",
+            platformId: platform.id,
+          });
+          await storage.createAuditLog({
+            entityType: "request",
+            entityId: existing.id,
+            action: "submitted_from_draft",
+            before: { status: "draft" },
+            after: updated,
+            actorId: user.id,
+          });
+          return res.json(updated);
+        }
+      }
+
       const request = await storage.createRequest(data);
 
       await storage.createAuditLog({

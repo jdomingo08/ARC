@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, ImpactBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, FilePlus, ChevronRight } from "lucide-react";
+import { FileText, FilePlus, ChevronRight, PenLine } from "lucide-react";
 import { useState } from "react";
 import type { Request, ReviewDecision } from "@shared/schema";
 
@@ -97,7 +97,9 @@ export default function MyRequestsPage() {
     queryKey: ["/api/requests"],
   });
 
-  const filtered = requests?.filter(r => statusFilter === "all" || r.status === statusFilter) || [];
+  const drafts = requests?.filter(r => r.status === "draft") || [];
+  const nonDrafts = requests?.filter(r => r.status !== "draft") || [];
+  const filtered = nonDrafts.filter(r => statusFilter === "all" || r.status === statusFilter);
 
   const formatDate = (date: string | Date) => {
     return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -126,6 +128,7 @@ export default function MyRequestsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="draft">Drafts</SelectItem>
               <SelectItem value="pending_reviews">Pending Reviews</SelectItem>
               <SelectItem value="waiting_on_requester">Waiting on Me</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
@@ -139,6 +142,33 @@ export default function MyRequestsPage() {
           </Link>
         </div>
       </div>
+
+      {/* Draft Requests */}
+      {drafts.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Drafts</h2>
+          {drafts.map(draft => (
+            <Link key={draft.id} href={`/requests/new?draft=${draft.id}`}>
+              <Card className="hover-elevate active-elevate-2 cursor-pointer border-dashed">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PenLine className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <p className="font-medium truncate">{draft.toolName || "Untitled Draft"}</p>
+                      <span className="text-xs font-mono text-muted-foreground shrink-0">{draft.trackingId}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <StatusBadge status="draft" />
+                      <span className="text-xs text-muted-foreground">{formatDate(draft.updatedAt)}</span>
+                      <Button size="sm" variant="outline">Continue</Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <Card>
