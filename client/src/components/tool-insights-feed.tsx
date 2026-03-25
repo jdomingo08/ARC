@@ -57,12 +57,12 @@ function InsightSection({
   color: string;
 }) {
   return (
-    <div className="border rounded-lg p-3 space-y-2 overflow-hidden">
-      <div className="flex items-center gap-2">
+    <div className="border rounded-lg p-3 space-y-2 min-w-0">
+      <div className="flex items-start gap-2">
         <div className={`p-1.5 rounded-md shrink-0 ${color}`}>
           <Icon className="h-3.5 w-3.5" />
         </div>
-        <h4 className="text-sm font-semibold truncate">{title}</h4>
+        <h4 className="text-sm font-semibold">{title}</h4>
       </div>
       <div className="text-sm text-muted-foreground leading-relaxed break-words">{children}</div>
     </div>
