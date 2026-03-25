@@ -36,7 +36,7 @@ export function AppSidebar() {
     { title: "Dashboard", url: "/", icon: LayoutDashboard, roles: ["requester", "reviewer", "chair", "admin"] },
     { title: "New Request", url: "/requests/new", icon: FilePlus, roles: ["requester", "reviewer", "chair", "admin"] },
     { title: "My Requests", url: "/requests", icon: FileText, roles: ["requester", "reviewer", "chair", "admin"] },
-    { title: "Review Inbox", url: "/reviews", icon: Inbox, roles: ["reviewer", "chair"] },
+    { title: "Review Inbox", url: "/reviews", icon: Inbox, roles: ["reviewer", "chair", "admin"] },
     { title: "Platforms", url: "/platforms", icon: Server, roles: ["requester", "reviewer", "chair", "admin"] },
   ];
 
