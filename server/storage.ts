@@ -137,9 +137,10 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async createRequest(request: InsertRequest): Promise<Request> {
+  async createRequest(request: InsertRequest & { status?: string }): Promise<Request> {
     const trackingId = `ARC-${Date.now().toString(36).toUpperCase()}`;
-    const [created] = await db.insert(requests).values({ ...request, trackingId, status: "pending_reviews" }).returning();
+    const status = request.status === "draft" ? "draft" : "pending_reviews";
+    const [created] = await db.insert(requests).values({ ...request, trackingId, status }).returning();
     return created;
   }
 
@@ -656,6 +657,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async runStartupMigrations(): Promise<void> {
+    // Allow nullable fields for draft requests
+    await pool.query(`
+      ALTER TABLE requests ALTER COLUMN primary_goal DROP NOT NULL;
+      ALTER TABLE requests ALTER COLUMN impact_level DROP NOT NULL;
+      ALTER TABLE requests ALTER COLUMN login_method DROP NOT NULL;
+      ALTER TABLE requests ALTER COLUMN estimated_users DROP NOT NULL;
+    `).catch(() => { /* columns may already be nullable */ });
+
     // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"
     await db.execute(sql`
       UPDATE platform_attribute_definitions
