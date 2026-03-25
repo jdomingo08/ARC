@@ -50,6 +50,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Trust Replit's reverse proxy so secure cookies work behind HTTPS termination
+  app.set("trust proxy", 1);
+
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "arc-intelligence-dev-secret",
