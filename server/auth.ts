@@ -43,15 +43,27 @@ export function configurePassport() {
             // Check for existing user first
             let user = await storage.getUserByEmail(email);
 
-            // Auto-provision new users with allowed domain as requesters
+            // Determine if this email should be an admin
+            const adminEmails = (process.env.ADMIN_EMAILS || "")
+              .split(",")
+              .map((e) => e.trim().toLowerCase())
+              .filter(Boolean);
+            const isAdmin = adminEmails.includes(email.toLowerCase());
+
+            // Auto-provision new users with allowed domain
             if (!user && allowedDomain && email.endsWith(`@${allowedDomain}`)) {
               const displayName = profile.displayName || email.split("@")[0];
               user = await storage.createUser({
                 name: displayName,
                 email,
                 department: "General",
-                role: "requester",
+                role: isAdmin ? "admin" : "requester",
               });
+            }
+
+            // Promote existing user to admin if they're in the admin list but aren't admin yet
+            if (user && isAdmin && user.role !== "admin") {
+              user = await storage.updateUserRole(user.id, "admin") || user;
             }
 
             if (!user) {
