@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import type { Platform, Request } from "@shared/schema";
 import { ToolInsightsFeed } from "@/components/tool-insights-feed";
+import { VendorQuestionnaire } from "@/components/vendor-questionnaire";
 
 const sections = [
   { title: "The Basics", icon: User, description: "Basic information about the tool request" },
@@ -62,10 +63,7 @@ const defaultFormData = {
   budgetOwner: "",
   costCenter: "",
   tierAssignment: "",
-  dataInput: [] as string[],
-  dataInputNotes: "",
-  dataTraining: "unsure",
-  loginMethod: "SSO",
+  vendorPacketAcknowledged: false,
 };
 
 export default function NewRequestPage() {
@@ -129,10 +127,7 @@ export default function NewRequestPage() {
         budgetOwner: (existingDraft as any).budgetOwner || "",
         costCenter: (existingDraft as any).costCenter || "",
         tierAssignment: (existingDraft as any).tierAssignment || "",
-        dataInput: existingDraft.dataInput || [],
-        dataInputNotes: existingDraft.dataInputNotes || "",
-        dataTraining: existingDraft.dataTraining || "unsure",
-        loginMethod: existingDraft.loginMethod || "SSO",
+        vendorPacketAcknowledged: (existingDraft as any).vendorPacketAcknowledged || false,
       });
     }
   }, [existingDraft]);
@@ -217,7 +212,7 @@ export default function NewRequestPage() {
       && formData.alreadyInUse && formData.authorizedRequestor
       && formData.trainingPlan && formData.aiPolicyAcknowledged
       && formData.useCaseType && formData.impactLevel
-      && formData.dataInput.length > 0 && formData.loginMethod;
+      && formData.vendorPacketAcknowledged;
   };
 
   const submitMutation = useMutation({
@@ -588,42 +583,27 @@ export default function NewRequestPage() {
               {step === 3 && (
                 <>
                   <div className="space-y-2">
-                    <Label>Data Input Categories *</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { value: "public", label: "Public Data" },
-                        { value: "client_data", label: "Client Data" },
-                        { value: "pii", label: "PII" },
-                        { value: "internal_financials", label: "Internal Financials" },
-                        { value: "other", label: "Other" },
-                      ].map(d => (
-                        <div key={d.value} className="flex items-center gap-2">
-                          <Checkbox checked={formData.dataInput.includes(d.value)} onCheckedChange={() => toggleArrayField("dataInput", d.value)} id={`data-${d.value}`} data-testid={`checkbox-data-${d.value}`} />
-                          <Label htmlFor={`data-${d.value}`}>{d.label}</Label>
-                        </div>
-                      ))}
+                    <Label>Vendor Security Packet Acknowledgment *</Label>
+                    <div className="flex items-start gap-2 p-3 rounded-md border">
+                      <Checkbox
+                        checked={formData.vendorPacketAcknowledged}
+                        onCheckedChange={v => updateField("vendorPacketAcknowledged", v)}
+                        id="vendor-packet"
+                        data-testid="checkbox-vendor-packet"
+                        className="mt-0.5"
+                      />
+                      <Label htmlFor="vendor-packet" className="text-sm leading-relaxed">
+                        I confirm I have sent the Vendor Security Packet to my vendor and will attach their completed responses before this form is submitted
+                      </Label>
                     </div>
-                    <Textarea value={formData.dataInputNotes} onChange={e => updateField("dataInputNotes", e.target.value)} placeholder="Additional notes about data handling" data-testid="input-data-notes" />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Does the vendor use your data for model training?</Label>
-                    <RadioGroup value={formData.dataTraining} onValueChange={v => updateField("dataTraining", v)} data-testid="radio-data-training">
-                      <div className="flex items-center gap-2"><RadioGroupItem value="yes" id="dt-yes" /><Label htmlFor="dt-yes">Yes</Label></div>
-                      <div className="flex items-center gap-2"><RadioGroupItem value="no" id="dt-no" /><Label htmlFor="dt-no">No</Label></div>
-                      <div className="flex items-center gap-2"><RadioGroupItem value="unsure" id="dt-unsure" /><Label htmlFor="dt-unsure">Unsure</Label></div>
-                    </RadioGroup>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Login Method *</Label>
-                    <Select value={formData.loginMethod} onValueChange={v => updateField("loginMethod", v)}>
-                      <SelectTrigger data-testid="select-login-method"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="SSO">SSO (Single Sign-On)</SelectItem>
-                        <SelectItem value="email_password">Email + Password</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+
+                  <VendorQuestionnaire
+                    requestId={draftId}
+                    vendorToken={(existingDraft as any)?.vendorQuestionnaireToken}
+                    vendorCompleted={(existingDraft as any)?.vendorQuestionnaireCompleted}
+                    division={formData.division}
+                  />
                 </>
               )}
             </CardContent>

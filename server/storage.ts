@@ -680,6 +680,10 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS budget_owner TEXT;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS cost_center TEXT;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS tier_assignment TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_packet_acknowledged BOOLEAN DEFAULT FALSE;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_token TEXT;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_completed BOOLEAN DEFAULT FALSE;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_data JSONB;
     `).catch(() => { /* columns may already exist */ });
 
     // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"

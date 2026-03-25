@@ -19,10 +19,21 @@ import PlatformDetailPage from "@/pages/platform-detail";
 import AdminPage from "@/pages/admin";
 import RiskAgentPage from "@/pages/risk-agent";
 import AgentModulesPage from "@/pages/agent-modules";
+import VendorFormPage from "@/pages/vendor-form";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {
   const { user, isLoading, isAuthenticated } = useAuth();
+
+  // Public vendor form route — no auth required
+  const path = window.location.pathname;
+  if (path.startsWith("/vendor-form/")) {
+    return (
+      <Switch>
+        <Route path="/vendor-form/:token" component={VendorFormPage} />
+      </Switch>
+    );
+  }
 
   if (isLoading) {
     return (
