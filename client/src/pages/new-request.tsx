@@ -41,6 +41,14 @@ const defaultFormData = {
   primaryGoal: "",
   estimatedUsers: "individual",
   estimatedUsersCount: "",
+  division: "",
+  toolCategory: "",
+  toolCategoryOther: "",
+  alreadyInUse: "new_request",
+  authorizedRequestor: false,
+  trainingPlan: "",
+  trainingPlanDetails: "",
+  aiPolicyAcknowledged: false,
   workflowIntegration: "",
   alternativesChecked: false,
   alternativesText: "",
@@ -95,6 +103,14 @@ export default function NewRequestPage() {
         primaryGoal: existingDraft.primaryGoal || "",
         estimatedUsers: existingDraft.estimatedUsers || "individual",
         estimatedUsersCount: existingDraft.estimatedUsersCount?.toString() || "",
+        division: (existingDraft as any).division || "",
+        toolCategory: (existingDraft as any).toolCategory || "",
+        toolCategoryOther: (existingDraft as any).toolCategoryOther || "",
+        alreadyInUse: (existingDraft as any).alreadyInUse || "new_request",
+        authorizedRequestor: (existingDraft as any).authorizedRequestor || false,
+        trainingPlan: (existingDraft as any).trainingPlan || "",
+        trainingPlanDetails: (existingDraft as any).trainingPlanDetails || "",
+        aiPolicyAcknowledged: (existingDraft as any).aiPolicyAcknowledged || false,
         workflowIntegration: existingDraft.workflowIntegration || "",
         alternativesChecked: existingDraft.alternativesChecked || false,
         alternativesText: existingDraft.alternativesText || "",
@@ -186,6 +202,10 @@ export default function NewRequestPage() {
 
   const canSubmit = () => {
     return formData.requesterName && formData.department && formData.toolName && formData.primaryGoal
+      && formData.division && formData.toolCategory
+      && (formData.toolCategory !== "other" || formData.toolCategoryOther)
+      && formData.alreadyInUse && formData.authorizedRequestor
+      && formData.trainingPlan && formData.aiPolicyAcknowledged
       && formData.impactLevel && formData.dataInput.length > 0 && formData.loginMethod;
   };
 
@@ -339,6 +359,104 @@ export default function NewRequestPage() {
                       <div className="flex items-center gap-2"><RadioGroupItem value="department" id="eu-dept" /><Label htmlFor="eu-dept">Department-wide (20+)</Label></div>
                     </RadioGroup>
                     <Input type="number" placeholder="Optional: exact number" value={formData.estimatedUsersCount} onChange={e => updateField("estimatedUsersCount", e.target.value)} data-testid="input-user-count" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Division *</Label>
+                    <Select value={formData.division} onValueChange={v => updateField("division", v)}>
+                      <SelectTrigger data-testid="select-division"><SelectValue placeholder="Select division" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="us_markets">US Markets</SelectItem>
+                        <SelectItem value="ats_international">ATS International</SelectItem>
+                        <SelectItem value="both">Both</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Tool Type / Category *</Label>
+                    <Select value={formData.toolCategory} onValueChange={v => { updateField("toolCategory", v); if (v !== "other") updateField("toolCategoryOther", ""); }}>
+                      <SelectTrigger data-testid="select-tool-category"><SelectValue placeholder="Select category" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="productivity">Productivity</SelectItem>
+                        <SelectItem value="creative">Creative</SelectItem>
+                        <SelectItem value="analytics">Analytics</SelectItem>
+                        <SelectItem value="agentic">Agentic</SelectItem>
+                        <SelectItem value="adtech">Adtech</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {formData.toolCategory === "other" && (
+                      <Input
+                        value={formData.toolCategoryOther}
+                        onChange={e => updateField("toolCategoryOther", e.target.value)}
+                        placeholder="Describe the tool type or category"
+                        data-testid="input-tool-category-other"
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Already in use? *</Label>
+                    <RadioGroup value={formData.alreadyInUse} onValueChange={v => updateField("alreadyInUse", v)} data-testid="radio-already-in-use">
+                      <div className="flex items-center gap-2"><RadioGroupItem value="new_request" id="aiu-new" /><Label htmlFor="aiu-new">New Request</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="amnesty" id="aiu-amnesty" /><Label htmlFor="aiu-amnesty">Already In Use (Amnesty)</Label></div>
+                    </RadioGroup>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Authorized Requestor Confirmation *</Label>
+                    <div className="flex items-start gap-2 p-3 rounded-md border">
+                      <Checkbox
+                        checked={formData.authorizedRequestor}
+                        onCheckedChange={v => updateField("authorizedRequestor", v)}
+                        id="auth-requestor"
+                        data-testid="checkbox-authorized-requestor"
+                        className="mt-0.5"
+                      />
+                      <Label htmlFor="auth-requestor" className="text-sm leading-relaxed">
+                        I am a designated decision-maker for my department or market
+                      </Label>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Training Plan Confirmation *</Label>
+                    <p className="text-xs text-muted-foreground">Will employees be trained before rollout? Who provides it?</p>
+                    <RadioGroup value={formData.trainingPlan} onValueChange={v => updateField("trainingPlan", v)} data-testid="radio-training-plan">
+                      <div className="flex items-center gap-2"><RadioGroupItem value="yes" id="tp-yes" /><Label htmlFor="tp-yes">Yes — training is planned</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="no" id="tp-no" /><Label htmlFor="tp-no">No — not required for this tool type</Label></div>
+                      <div className="flex items-center gap-2"><RadioGroupItem value="unknown" id="tp-unknown" /><Label htmlFor="tp-unknown">Unknown</Label></div>
+                    </RadioGroup>
+                    {formData.trainingPlan === "yes" && (
+                      <Textarea
+                        value={formData.trainingPlanDetails}
+                        onChange={e => updateField("trainingPlanDetails", e.target.value)}
+                        placeholder="Describe the training plan (e.g., who provides it, timeline, format)"
+                        data-testid="input-training-plan-details"
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>AI Use Policy Acknowledgment *</Label>
+                    <div className="flex items-start gap-2 p-3 rounded-md border">
+                      <Checkbox
+                        checked={formData.aiPolicyAcknowledged}
+                        onCheckedChange={v => updateField("aiPolicyAcknowledged", v)}
+                        id="ai-policy"
+                        data-testid="checkbox-ai-policy"
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <Label htmlFor="ai-policy" className="text-sm leading-relaxed">
+                          I have read and understand the{" "}
+                          <a href="/ai-use-policy.pdf" target="_blank" rel="noopener noreferrer" className="text-primary underline hover:text-primary/80">
+                            Entravision AI Use Policy
+                          </a>
+                        </Label>
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
