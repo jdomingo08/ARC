@@ -39,7 +39,10 @@ import {
   Trash2,
   X,
   Save,
+  ShieldCheck,
+  Clock,
 } from "lucide-react";
+import { getFilteredQuestions } from "@shared/vendor-questions";
 import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment } from "@shared/schema";
 
 export default function RequestDetailPage() {
@@ -453,6 +456,49 @@ export default function RequestDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Vendor Questionnaire Responses */}
+          {(request as any).vendorQuestionnaireCompleted && (request as any).vendorQuestionnaireData && (
+            <Card className="border-green-200 bg-green-50/30 dark:bg-green-950/10 dark:border-green-800">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-green-600" /> Vendor Security Responses
+                </CardTitle>
+                <CardDescription>Completed by the vendor via the secure questionnaire link</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {getFilteredQuestions((request as any).division).map((q, i) => {
+                  const answer = ((request as any).vendorQuestionnaireData as Record<string, string>)?.[q.id];
+                  return (
+                    <div key={q.id} className="space-y-1">
+                      <p className="text-sm font-semibold">{i + 1}. {q.title}</p>
+                      <p className="text-xs text-muted-foreground">{q.question}</p>
+                      {answer ? (
+                        <div className="bg-white dark:bg-background rounded border p-2 text-sm whitespace-pre-wrap">{answer}</div>
+                      ) : (
+                        <p className="text-xs italic text-muted-foreground">No response provided</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Vendor Link Pending */}
+          {(request as any).vendorQuestionnaireToken && !(request as any).vendorQuestionnaireCompleted && (
+            <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <Clock className="h-5 w-5 text-amber-600" />
+                  <div>
+                    <p className="text-sm font-medium">Vendor Security Questionnaire Pending</p>
+                    <p className="text-xs text-muted-foreground">A questionnaire link has been sent to the vendor. Responses will appear here once submitted.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Comments Section */}
           <Card>
