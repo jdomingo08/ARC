@@ -481,113 +481,90 @@ export default function RequestDetailPage() {
           </Card>
 
           {/* Vendor Questionnaire Responses */}
-          {(request as any).vendorQuestionnaireCompleted && (request as any).vendorQuestionnaireData && (
-            <Card className="border-green-200 bg-green-50/30 dark:bg-green-950/10 dark:border-green-800">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-green-600" /> Vendor Security Responses
-                </CardTitle>
-                <CardDescription>Completed by the vendor via the secure questionnaire link</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {getFilteredQuestions((request as any).division).map((q, i) => {
-                  const answer = ((request as any).vendorQuestionnaireData as Record<string, string>)?.[q.id];
-                  return (
-                    <div key={q.id} className="space-y-1">
-                      <p className="text-sm font-semibold">{i + 1}. {q.title}</p>
-                      <p className="text-xs text-muted-foreground">{q.question}</p>
-                      {answer ? (
-                        <div className="bg-white dark:bg-background rounded border p-2 text-sm whitespace-pre-wrap">{answer}</div>
-                      ) : (
-                        <p className="text-xs italic text-muted-foreground">No response provided</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          )}
+          {(request as any).vendorQuestionnaireCompleted && (request as any).vendorQuestionnaireData && (() => {
+            const isSecurityReviewer = user && (user.reviewerRole === "security" || user.role === "admin");
+            const existingReview = (request as any).vendorSecurityReview as Record<string, string> | null;
+            const questions = getFilteredQuestions((request as any).division);
+            const passCount = existingReview ? Object.values(existingReview).filter(v => v === "pass").length : 0;
+            const totalReviewed = existingReview ? Object.keys(existingReview).length : 0;
 
-          {/* Vendor Security Review Matrix — security reviewer and admin only */}
-          {(request as any).vendorQuestionnaireCompleted && (request as any).vendorQuestionnaireData &&
-           user && (user.reviewerRole === "security" || user.role === "admin") && (
-            <Card className="border-indigo-200 bg-indigo-50/30 dark:bg-indigo-950/10 dark:border-indigo-800">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-indigo-600" /> Security Assessment
-                </CardTitle>
-                <CardDescription>
-                  {(request as any).vendorSecurityReview
-                    ? `Reviewed — ${Object.values((request as any).vendorSecurityReview as Record<string, string>).filter(v => v === "pass").length}/${Object.keys((request as any).vendorSecurityReview as Record<string, string>).length} questions passed`
-                    : "Review each vendor response with a Pass or Fail"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {getFilteredQuestions((request as any).division).map((q, i) => {
-                  const existingReview = (request as any).vendorSecurityReview as Record<string, string> | null;
-                  const currentValue = existingReview?.[q.id] || securityAssessments[q.id] || "";
-                  const isSubmitted = !!existingReview;
-                  return (
-                    <div key={q.id} className="flex items-center justify-between gap-3 p-2 border rounded">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">{i + 1}. {q.title}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isSubmitted ? (
-                          <span className={`text-xs font-semibold px-2 py-1 rounded ${currentValue === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {currentValue === "pass" ? "Pass" : "Fail"}
-                          </span>
+            return (
+              <Card className="border-green-200 bg-green-50/30 dark:bg-green-950/10 dark:border-green-800">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-green-600" /> Vendor Security Responses
+                  </CardTitle>
+                  <CardDescription>
+                    Completed by the vendor via the secure questionnaire link
+                    {existingReview && (
+                      <span className="ml-2 font-medium text-green-700">— Security Assessment: {passCount}/{totalReviewed} passed</span>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {questions.map((q, i) => {
+                    const answer = ((request as any).vendorQuestionnaireData as Record<string, string>)?.[q.id];
+                    const reviewValue = existingReview?.[q.id] || securityAssessments[q.id] || "";
+
+                    return (
+                      <div key={q.id} className="border rounded-lg p-3 space-y-2 bg-white dark:bg-background">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold">{i + 1}. {q.title}</p>
+                          {/* Inline pass/fail — security reviewer and admin only */}
+                          {isSecurityReviewer && (
+                            <div className="shrink-0">
+                              {existingReview ? (
+                                <span className={`text-xs font-semibold px-2 py-1 rounded ${reviewValue === "pass" ? "bg-green-100 text-green-700" : reviewValue === "fail" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-500"}`}>
+                                  {reviewValue === "pass" ? "Pass" : reviewValue === "fail" ? "Fail" : "—"}
+                                </span>
+                              ) : (
+                                <RadioGroup
+                                  value={securityAssessments[q.id] || ""}
+                                  onValueChange={v => setSecurityAssessments(prev => ({ ...prev, [q.id]: v }))}
+                                  className="flex gap-2"
+                                >
+                                  <div className="flex items-center gap-1">
+                                    <RadioGroupItem value="pass" id={`sa-pass-${q.id}`} />
+                                    <label htmlFor={`sa-pass-${q.id}`} className="text-xs text-green-700 font-medium cursor-pointer">Pass</label>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <RadioGroupItem value="fail" id={`sa-fail-${q.id}`} />
+                                    <label htmlFor={`sa-fail-${q.id}`} className="text-xs text-red-700 font-medium cursor-pointer">Fail</label>
+                                  </div>
+                                </RadioGroup>
+                              )}
+                            </div>
+                          )}
+                          {/* Show submitted badge for non-security users */}
+                          {!isSecurityReviewer && existingReview && reviewValue && (
+                            <span className={`text-xs font-semibold px-2 py-1 rounded shrink-0 ${reviewValue === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                              {reviewValue === "pass" ? "Pass" : "Fail"}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{q.question}</p>
+                        {answer ? (
+                          <div className="rounded border border-green-200 bg-green-50/50 dark:bg-green-950/20 p-2 text-sm whitespace-pre-wrap">{answer}</div>
                         ) : (
-                          <RadioGroup
-                            value={securityAssessments[q.id] || ""}
-                            onValueChange={v => setSecurityAssessments(prev => ({ ...prev, [q.id]: v }))}
-                            className="flex gap-2"
-                          >
-                            <div className="flex items-center gap-1">
-                              <RadioGroupItem value="pass" id={`sa-pass-${q.id}`} />
-                              <label htmlFor={`sa-pass-${q.id}`} className="text-xs text-green-700 font-medium cursor-pointer">Pass</label>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <RadioGroupItem value="fail" id={`sa-fail-${q.id}`} />
-                              <label htmlFor={`sa-fail-${q.id}`} className="text-xs text-red-700 font-medium cursor-pointer">Fail</label>
-                            </div>
-                          </RadioGroup>
+                          <p className="text-xs italic text-muted-foreground">No response provided</p>
                         )}
                       </div>
-                    </div>
-                  );
-                })}
-                {!(request as any).vendorSecurityReview && (
-                  <Button
-                    onClick={submitSecurityAssessment}
-                    disabled={assessmentSubmitting || Object.keys(securityAssessments).length === 0}
-                    className="w-full"
-                  >
-                    {assessmentSubmitting ? "Submitting..." : "Submit Security Assessment"}
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Vendor Security Review Summary — visible to all non-security users */}
-          {(request as any).vendorSecurityReview && user &&
-           user.reviewerRole !== "security" && user.role !== "admin" && (
-            <Card className="border-indigo-200 bg-indigo-50/30 dark:bg-indigo-950/10 dark:border-indigo-800">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <ShieldCheck className="h-5 w-5 text-indigo-600" />
-                  <div>
-                    <p className="text-sm font-medium">Security Assessment Complete</p>
-                    <p className="text-xs text-muted-foreground">
-                      {Object.values((request as any).vendorSecurityReview as Record<string, string>).filter(v => v === "pass").length}/
-                      {Object.keys((request as any).vendorSecurityReview as Record<string, string>).length} questions passed
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                    );
+                  })}
+                  {/* Submit button for security reviewer */}
+                  {isSecurityReviewer && !existingReview && (
+                    <Button
+                      onClick={submitSecurityAssessment}
+                      disabled={assessmentSubmitting || Object.keys(securityAssessments).length === 0}
+                      className="w-full"
+                    >
+                      {assessmentSubmitting ? "Submitting..." : "Submit Security Assessment"}
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           {/* Vendor Link Pending */}
           {(request as any).vendorQuestionnaireToken && !(request as any).vendorQuestionnaireCompleted && (
