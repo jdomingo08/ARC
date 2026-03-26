@@ -471,6 +471,19 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE platforms ADD COLUMN IF NOT EXISTS logo_url TEXT;
     `).catch(() => { /* column may already exist */ });
 
+    // Ensure workflow_steps table exists before seeding
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS workflow_steps (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        reviewer_role TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        required BOOLEAN NOT NULL DEFAULT TRUE,
+        min_approvals INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `).catch(() => { /* table may already exist */ });
+
     // Seed workflow steps if none exist
     const existingSteps = await db.select().from(workflowSteps);
     if (existingSteps.length === 0) {
