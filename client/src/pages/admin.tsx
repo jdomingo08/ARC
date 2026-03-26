@@ -15,16 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { RoleBadge } from "@/components/status-badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Layers, Users, Tag, Trash2, Pencil, Bell, Save } from "lucide-react";
+import { Plus, Layers, Users, Tag, Trash2, Pencil, Bell, Save, GitBranch, ArrowUp, ArrowDown } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { PlatformAttributeDefinition, Tier, User, AlertSchedule } from "@shared/schema";
+import type { PlatformAttributeDefinition, Tier, User, AlertSchedule, WorkflowStep } from "@shared/schema";
 
 export default function AdminPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-admin-title">Administration</h1>
-        <p className="text-muted-foreground mt-1">Manage attributes, tiers, user roles, and alert schedules</p>
+        <p className="text-muted-foreground mt-1">Manage attributes, tiers, user roles, alert schedules, and workflow</p>
       </div>
 
       <Tabs defaultValue="attributes">
@@ -41,6 +41,9 @@ export default function AdminPage() {
           <TabsTrigger value="alerts" data-testid="tab-alerts">
             <Bell className="h-4 w-4 mr-1" /> Alerts
           </TabsTrigger>
+          <TabsTrigger value="workflow" data-testid="tab-workflow">
+            <GitBranch className="h-4 w-4 mr-1" /> Workflow
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="attributes" className="mt-4">
@@ -54,6 +57,9 @@ export default function AdminPage() {
         </TabsContent>
         <TabsContent value="alerts" className="mt-4">
           <AlertsTab />
+        </TabsContent>
+        <TabsContent value="workflow" className="mt-4">
+          <WorkflowTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -591,6 +597,272 @@ function UsersTab() {
             </div>
           ))}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const REVIEWER_ROLE_OPTIONS = ["security", "technical_financial", "chair", "strategic"];
+
+function WorkflowTab() {
+  const { toast } = useToast();
+  const { data: steps, isLoading } = useQuery<WorkflowStep[]>({
+    queryKey: ["/api/admin/workflow-steps"],
+  });
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newReviewerRole, setNewReviewerRole] = useState("security");
+  const [newCustomRole, setNewCustomRole] = useState("");
+  const [useCustomRole, setUseCustomRole] = useState(false);
+  const [newRequired, setNewRequired] = useState(true);
+  const [newMinApprovals, setNewMinApprovals] = useState(1);
+
+  const sortedSteps = steps ? [...steps].sort((a, b) => a.sortOrder - b.sortOrder) : [];
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const role = useCustomRole ? newCustomRole : newReviewerRole;
+      const sortOrder = sortedSteps.length > 0 ? sortedSteps[sortedSteps.length - 1].sortOrder + 1 : 1;
+      const res = await apiRequest("POST", "/api/admin/workflow-steps", {
+        name: newName,
+        reviewerRole: role,
+        sortOrder,
+        required: newRequired,
+        minApprovals: newMinApprovals,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Workflow Step Created" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-steps"] });
+      setOpen(false);
+      setNewName("");
+      setNewReviewerRole("security");
+      setNewCustomRole("");
+      setUseCustomRole(false);
+      setNewRequired(true);
+      setNewMinApprovals(1);
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: async ({ id, sortOrder }: { id: string; sortOrder: number }) => {
+      const res = await apiRequest("PATCH", `/api/admin/workflow-steps/${id}`, { sortOrder });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-steps"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const toggleRequiredMutation = useMutation({
+    mutationFn: async ({ id, required }: { id: string; required: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/admin/workflow-steps/${id}`, { required });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Step Updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-steps"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const updateMinApprovalsMutation = useMutation({
+    mutationFn: async ({ id, minApprovals }: { id: string; minApprovals: number }) => {
+      const res = await apiRequest("PATCH", `/api/admin/workflow-steps/${id}`, { minApprovals });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Min Approvals Updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-steps"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/admin/workflow-steps/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Workflow Step Deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-steps"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleDelete = (id: string, stepName: string) => {
+    if (window.confirm(`Delete workflow step "${stepName}"? This cannot be undone.`)) {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  const handleMoveUp = (index: number) => {
+    if (index <= 0) return;
+    const current = sortedSteps[index];
+    const above = sortedSteps[index - 1];
+    reorderMutation.mutate({ id: current.id, sortOrder: above.sortOrder });
+    reorderMutation.mutate({ id: above.id, sortOrder: current.sortOrder });
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (index >= sortedSteps.length - 1) return;
+    const current = sortedSteps[index];
+    const below = sortedSteps[index + 1];
+    reorderMutation.mutate({ id: current.id, sortOrder: below.sortOrder });
+    reorderMutation.mutate({ id: below.id, sortOrder: current.sortOrder });
+  };
+
+  if (isLoading) return <Skeleton className="h-48 w-full" />;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-1">
+        <div>
+          <CardTitle>Workflow Steps</CardTitle>
+          <CardDescription>Configure the review workflow steps and their order</CardDescription>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" data-testid="button-add-workflow-step">
+              <Plus className="h-4 w-4 mr-1" /> Add Step
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New Workflow Step</DialogTitle>
+              <DialogDescription>Add a new step to the review workflow</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g., Security Review" data-testid="input-step-name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Reviewer Role *</Label>
+                <div className="flex items-center gap-2 mb-2">
+                  <Checkbox checked={useCustomRole} onCheckedChange={v => setUseCustomRole(!!v)} id="use-custom-role" data-testid="checkbox-custom-role" />
+                  <Label htmlFor="use-custom-role" className="text-sm">Use custom role</Label>
+                </div>
+                {useCustomRole ? (
+                  <Input value={newCustomRole} onChange={e => setNewCustomRole(e.target.value)} placeholder="Enter custom role name" data-testid="input-custom-role" />
+                ) : (
+                  <Select value={newReviewerRole} onValueChange={setNewReviewerRole}>
+                    <SelectTrigger data-testid="select-reviewer-role"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {REVIEWER_ROLE_OPTIONS.map(role => (
+                        <SelectItem key={role} value={role}>{role}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch checked={newRequired} onCheckedChange={setNewRequired} id="new-step-required" data-testid="switch-step-required" />
+                <Label htmlFor="new-step-required">Required</Label>
+              </div>
+              <div className="space-y-2">
+                <Label>Min Approvals</Label>
+                <Input type="number" min={1} value={newMinApprovals} onChange={e => setNewMinApprovals(parseInt(e.target.value) || 1)} data-testid="input-step-min-approvals" />
+              </div>
+              <Button
+                onClick={() => createMutation.mutate()}
+                disabled={!newName || (useCustomRole ? !newCustomRole : false) || createMutation.isPending}
+                className="w-full"
+                data-testid="button-save-workflow-step"
+              >
+                {createMutation.isPending ? "Creating..." : "Create Step"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent>
+        {sortedSteps.length > 0 ? (
+          <div className="space-y-2">
+            {sortedSteps.map((step, index) => (
+              <div key={step.id} className="flex items-center justify-between gap-3 p-3 rounded-md border">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="flex flex-col gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      disabled={index === 0 || reorderMutation.isPending}
+                      onClick={() => handleMoveUp(index)}
+                      data-testid={`button-move-up-${step.id}`}
+                    >
+                      <ArrowUp className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      disabled={index === sortedSteps.length - 1 || reorderMutation.isPending}
+                      onClick={() => handleMoveDown(index)}
+                      data-testid={`button-move-down-${step.id}`}
+                    >
+                      <ArrowDown className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">{step.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Role: {step.reviewerRole} | Order: {step.sortOrder}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      checked={step.required}
+                      onCheckedChange={checked => toggleRequiredMutation.mutate({ id: step.id, required: checked })}
+                      data-testid={`switch-required-${step.id}`}
+                    />
+                    <Label className="text-xs">{step.required ? "Required" : "Optional"}</Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Label className="text-xs whitespace-nowrap">Min approvals</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      className="w-16 h-7 text-xs"
+                      value={step.minApprovals}
+                      onChange={e => {
+                        const val = parseInt(e.target.value);
+                        if (val >= 1) updateMinApprovalsMutation.mutate({ id: step.id, minApprovals: val });
+                      }}
+                      data-testid={`input-min-approvals-${step.id}`}
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(step.id, step.name)}
+                    data-testid={`button-delete-step-${step.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-center py-8">No workflow steps defined yet. Click "Add Step" to create your first step.</p>
+        )}
       </CardContent>
     </Card>
   );

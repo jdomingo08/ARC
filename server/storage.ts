@@ -22,6 +22,8 @@ import {
   type PlatformStakeholder, type InsertPlatformStakeholder,
   type ExpirationAlert, type InsertExpirationAlert,
   type PlatformAttachment, type InsertPlatformAttachment,
+  workflowSteps,
+  type WorkflowStep, type InsertWorkflowStep,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -107,6 +109,11 @@ export interface IStorage {
   getAttachmentsByPlatform(platformId: string): Promise<PlatformAttachment[]>;
   getPlatformAttachment(id: string): Promise<PlatformAttachment | undefined>;
   deletePlatformAttachment(id: string): Promise<boolean>;
+
+  getWorkflowSteps(): Promise<WorkflowStep[]>;
+  createWorkflowStep(step: InsertWorkflowStep): Promise<WorkflowStep>;
+  updateWorkflowStep(id: string, data: Partial<WorkflowStep>): Promise<WorkflowStep | undefined>;
+  deleteWorkflowStep(id: string): Promise<boolean>;
 
   seedData(): Promise<void>;
   runStartupMigrations(): Promise<void>;
@@ -439,11 +446,41 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
+  async getWorkflowSteps(): Promise<WorkflowStep[]> {
+    return db.select().from(workflowSteps).orderBy(workflowSteps.sortOrder);
+  }
+
+  async createWorkflowStep(step: InsertWorkflowStep): Promise<WorkflowStep> {
+    const [created] = await db.insert(workflowSteps).values(step).returning();
+    return created;
+  }
+
+  async updateWorkflowStep(id: string, data: Partial<WorkflowStep>): Promise<WorkflowStep | undefined> {
+    const [updated] = await db.update(workflowSteps).set(data).where(eq(workflowSteps.id, id)).returning();
+    return updated;
+  }
+
+  async deleteWorkflowStep(id: string): Promise<boolean> {
+    const result = await db.delete(workflowSteps).where(eq(workflowSteps.id, id)).returning();
+    return result.length > 0;
+  }
+
   async seedData(): Promise<void> {
     // Runtime migration: add logo_url column if missing
     await pool.query(`
       ALTER TABLE platforms ADD COLUMN IF NOT EXISTS logo_url TEXT;
     `).catch(() => { /* column may already exist */ });
+
+    // Seed workflow steps if none exist
+    const existingSteps = await db.select().from(workflowSteps);
+    if (existingSteps.length === 0) {
+      await db.insert(workflowSteps).values([
+        { name: "Security Review", reviewerRole: "security", sortOrder: 1, required: true, minApprovals: 1 },
+        { name: "Tech/Financial Review", reviewerRole: "technical_financial", sortOrder: 2, required: true, minApprovals: 1 },
+        { name: "Chair Sign-off", reviewerRole: "chair", sortOrder: 3, required: true, minApprovals: 2 },
+        { name: "Strategic Review", reviewerRole: "strategic", sortOrder: 4, required: false, minApprovals: 1 },
+      ]);
+    }
 
     const existingUsers = await db.select().from(users);
     if (existingUsers.length > 0) return;
@@ -684,7 +721,23 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_token TEXT;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_completed BOOLEAN DEFAULT FALSE;
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_questionnaire_data JSONB;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_security_review JSONB;
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_security_reviewer_id VARCHAR(36);
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_security_reviewed_at TIMESTAMP;
     `).catch(() => { /* columns may already exist */ });
+
+    // Create workflow_steps table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS workflow_steps (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        name TEXT NOT NULL,
+        reviewer_role TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        required BOOLEAN NOT NULL DEFAULT TRUE,
+        min_approvals INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `).catch(() => { /* table may already exist */ });
 
     // Rename "Contract Expiry" and "Contract Expiration" → "Contract Expiration Date"
     await db.execute(sql`

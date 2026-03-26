@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatusBadge, ImpactBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Inbox, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Inbox, ArrowRight, CheckCircle2, FileEdit } from "lucide-react";
 import type { Request, ReviewDecision } from "@shared/schema";
 
 export default function ReviewerInboxPage() {
@@ -15,8 +15,9 @@ export default function ReviewerInboxPage() {
   const formatDate = (date: string | Date) =>
     new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+  const draftRequests = requests?.filter(r => r.status === "draft") || [];
   const pendingRequests = requests?.filter(r => r.status === "pending_reviews") || [];
-  const completedRequests = requests?.filter(r => r.status !== "pending_reviews") || [];
+  const completedRequests = requests?.filter(r => r.status !== "pending_reviews" && r.status !== "draft") || [];
 
   if (reqLoading) {
     return (
@@ -38,6 +39,9 @@ export default function ReviewerInboxPage() {
 
       <Tabs defaultValue="pending">
         <TabsList>
+          <TabsTrigger value="in-progress" data-testid="tab-in-progress">
+            In Progress ({draftRequests.length})
+          </TabsTrigger>
           <TabsTrigger value="pending" data-testid="tab-pending">
             Pending ({pendingRequests.length})
           </TabsTrigger>
@@ -45,6 +49,44 @@ export default function ReviewerInboxPage() {
             Completed ({completedRequests.length})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="in-progress" className="space-y-2 mt-4">
+          {draftRequests.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <FileEdit className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                <p className="text-muted-foreground">No draft requests</p>
+                <p className="text-sm text-muted-foreground mt-1">No requests are currently in progress.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            draftRequests.map(req => (
+              <Link key={req.id} href={`/requests/${req.id}`}>
+                <Card className="border-dashed cursor-pointer hover-elevate">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex items-center justify-center w-10 h-10 rounded-md bg-muted text-xs font-mono font-medium shrink-0">
+                          <FileEdit className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium truncate" data-testid={`text-draft-tool-${req.id}`}>{req.toolName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {req.requesterName} - {req.department} - {formatDate(req.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <StatusBadge status={req.status} />
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))
+          )}
+        </TabsContent>
 
         <TabsContent value="pending" className="space-y-2 mt-4">
           {pendingRequests.length === 0 ? (
