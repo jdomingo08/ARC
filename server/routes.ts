@@ -176,9 +176,8 @@ export async function registerRoutes(
       if (user.role === "requester") {
         reqs = await storage.getRequestsByRequester(user.id);
       } else {
-        // Non-requesters see all requests but only their own drafts
-        const all = await storage.getAllRequests();
-        reqs = all.filter(r => r.status !== "draft" || r.requesterId === user.id);
+        // Non-requesters (reviewers/chairs/admins) see all requests including drafts
+        reqs = await storage.getAllRequests();
       }
       res.json(reqs);
     } catch (e: any) {
@@ -415,13 +414,18 @@ export async function registerRoutes(
       const reviewerRole = user.reviewerRole;
       if (!reviewerRole) return res.status(400).json({ message: "User has no reviewer role assigned" });
 
-      if (reviewerRole === "chair" && decision === "pass") {
+      // Dynamic workflow: check if prior required steps are completed before allowing pass
+      const wfSteps = await storage.getWorkflowSteps();
+      const currentStep = wfSteps.find(s => s.reviewerRole === reviewerRole);
+      if (decision === "pass" && currentStep) {
         const allReviews = await storage.getReviewDecisionsByRequest(req.params.id);
         const activeReviews = allReviews.filter(r => !r.superseded);
-        const securityPass = activeReviews.some(r => r.reviewerRole === "security" && r.decision === "pass");
-        const techPass = activeReviews.some(r => r.reviewerRole === "technical_financial" && r.decision === "pass");
-        if (!securityPass || !techPass) {
-          return res.status(400).json({ message: "Chair cannot approve until Security and Tech/Financial reviews both pass" });
+        const priorRequired = wfSteps.filter(s => s.required && s.sortOrder < currentStep.sortOrder);
+        for (const prior of priorRequired) {
+          const passes = activeReviews.filter(r => r.reviewerRole === prior.reviewerRole && r.decision === "pass");
+          if (passes.length < prior.minApprovals) {
+            return res.status(400).json({ message: `Cannot approve until ${prior.name} is completed` });
+          }
         }
       }
 
@@ -455,14 +459,16 @@ export async function registerRoutes(
           await storage.updatePlatform(request.platformId, { status: "rejected", decisionSummary: `Rejected by ${reviewerRole}: ${rationale}` });
         }
       } else if (decision === "pass") {
+        // Dynamic workflow: check if ALL required steps are now complete
         const allReviews = await storage.getReviewDecisionsByRequest(req.params.id);
         const activeReviews = allReviews.filter(r => !r.superseded);
+        const requiredSteps = wfSteps.filter(s => s.required);
+        const allRequiredMet = requiredSteps.every(step => {
+          const passes = activeReviews.filter(r => r.reviewerRole === step.reviewerRole && r.decision === "pass");
+          return passes.length >= step.minApprovals;
+        });
 
-        const securityPass = activeReviews.some(r => r.reviewerRole === "security" && r.decision === "pass");
-        const techPass = activeReviews.some(r => r.reviewerRole === "technical_financial" && r.decision === "pass");
-        const chairPasses = activeReviews.filter(r => r.reviewerRole === "chair" && r.decision === "pass");
-
-        if (securityPass && techPass && chairPasses.length >= 2) {
+        if (allRequiredMet) {
           await storage.updateRequestStatus(req.params.id, "approved");
           await storage.updateRequest(req.params.id, { locked: true });
           if (request.platformId) {
@@ -1301,6 +1307,101 @@ export async function registerRoutes(
         activeRisks: allFindings.filter(f => f.classification === "high" || f.classification === "critical").length,
         recentRequests: allRequests.slice(0, 5),
       });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Vendor Security Review (question-level pass/fail) ---
+
+  app.post("/api/requests/:id/vendor-security-review", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      if (user.reviewerRole !== "security" && user.role !== "admin") {
+        return res.status(403).json({ message: "Only security reviewers and admins can submit vendor security reviews" });
+      }
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const { assessments } = req.body;
+      if (!assessments || typeof assessments !== "object") {
+        return res.status(400).json({ message: "Assessments are required" });
+      }
+
+      const updated = await storage.updateRequest(request.id, {
+        vendorSecurityReview: assessments,
+        vendorSecurityReviewerId: user.id,
+        vendorSecurityReviewedAt: new Date(),
+      } as any);
+
+      await storage.createAuditLog({
+        entityType: "request",
+        entityId: request.id,
+        action: "vendor_security_review",
+        before: null,
+        after: { assessments, reviewerId: user.id },
+        actorId: user.id,
+      });
+
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // --- Workflow Steps CRUD ---
+
+  app.get("/api/admin/workflow-steps", requireAuth, requireRole("admin", "chair"), async (_req, res) => {
+    try {
+      const steps = await storage.getWorkflowSteps();
+      res.json(steps);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Public endpoint for workflow steps (used by request detail page)
+  app.get("/api/workflow-steps", requireAuth, async (_req, res) => {
+    try {
+      const steps = await storage.getWorkflowSteps();
+      res.json(steps);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/admin/workflow-steps", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const { name, reviewerRole, sortOrder, required, minApprovals } = req.body;
+      if (!name || !reviewerRole) return res.status(400).json({ message: "Name and reviewer role are required" });
+      const step = await storage.createWorkflowStep({
+        name,
+        reviewerRole,
+        sortOrder: sortOrder || 99,
+        required: required !== false,
+        minApprovals: minApprovals || 1,
+      });
+      res.json(step);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.patch("/api/admin/workflow-steps/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const updated = await storage.updateWorkflowStep(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Step not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/admin/workflow-steps/:id", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const deleted = await storage.deleteWorkflowStep(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Step not found" });
+      res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }

@@ -43,7 +43,8 @@ import {
   Clock,
 } from "lucide-react";
 import { getFilteredQuestions } from "@shared/vendor-questions";
-import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment } from "@shared/schema";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment, WorkflowStep } from "@shared/schema";
 
 export default function RequestDetailPage() {
   const [, params] = useRoute("/requests/:id");
@@ -81,6 +82,28 @@ export default function RequestDetailPage() {
     queryKey: ["/api/requests", id, "attachments"],
     enabled: !!id,
   });
+
+  const { data: workflowSteps } = useQuery<WorkflowStep[]>({
+    queryKey: ["/api/workflow-steps"],
+  });
+
+  // Vendor security review state
+  const [securityAssessments, setSecurityAssessments] = useState<Record<string, string>>({});
+  const [assessmentSubmitting, setAssessmentSubmitting] = useState(false);
+
+  const submitSecurityAssessment = async () => {
+    if (!id) return;
+    setAssessmentSubmitting(true);
+    try {
+      await apiRequest("POST", `/api/requests/${id}/vendor-security-review`, { assessments: securityAssessments });
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+      toast({ title: "Security Assessment Submitted" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setAssessmentSubmitting(false);
+    }
+  };
 
   const resubmitMutation = useMutation({
     mutationFn: async () => {
@@ -485,6 +508,87 @@ export default function RequestDetailPage() {
             </Card>
           )}
 
+          {/* Vendor Security Review Matrix — security reviewer and admin only */}
+          {(request as any).vendorQuestionnaireCompleted && (request as any).vendorQuestionnaireData &&
+           user && (user.reviewerRole === "security" || user.role === "admin") && (
+            <Card className="border-indigo-200 bg-indigo-50/30 dark:bg-indigo-950/10 dark:border-indigo-800">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-indigo-600" /> Security Assessment
+                </CardTitle>
+                <CardDescription>
+                  {(request as any).vendorSecurityReview
+                    ? `Reviewed — ${Object.values((request as any).vendorSecurityReview as Record<string, string>).filter(v => v === "pass").length}/${Object.keys((request as any).vendorSecurityReview as Record<string, string>).length} questions passed`
+                    : "Review each vendor response with a Pass or Fail"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {getFilteredQuestions((request as any).division).map((q, i) => {
+                  const existingReview = (request as any).vendorSecurityReview as Record<string, string> | null;
+                  const currentValue = existingReview?.[q.id] || securityAssessments[q.id] || "";
+                  const isSubmitted = !!existingReview;
+                  return (
+                    <div key={q.id} className="flex items-center justify-between gap-3 p-2 border rounded">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{i + 1}. {q.title}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isSubmitted ? (
+                          <span className={`text-xs font-semibold px-2 py-1 rounded ${currentValue === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                            {currentValue === "pass" ? "Pass" : "Fail"}
+                          </span>
+                        ) : (
+                          <RadioGroup
+                            value={securityAssessments[q.id] || ""}
+                            onValueChange={v => setSecurityAssessments(prev => ({ ...prev, [q.id]: v }))}
+                            className="flex gap-2"
+                          >
+                            <div className="flex items-center gap-1">
+                              <RadioGroupItem value="pass" id={`sa-pass-${q.id}`} />
+                              <label htmlFor={`sa-pass-${q.id}`} className="text-xs text-green-700 font-medium cursor-pointer">Pass</label>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <RadioGroupItem value="fail" id={`sa-fail-${q.id}`} />
+                              <label htmlFor={`sa-fail-${q.id}`} className="text-xs text-red-700 font-medium cursor-pointer">Fail</label>
+                            </div>
+                          </RadioGroup>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!(request as any).vendorSecurityReview && (
+                  <Button
+                    onClick={submitSecurityAssessment}
+                    disabled={assessmentSubmitting || Object.keys(securityAssessments).length === 0}
+                    className="w-full"
+                  >
+                    {assessmentSubmitting ? "Submitting..." : "Submit Security Assessment"}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Vendor Security Review Summary — visible to all non-security users */}
+          {(request as any).vendorSecurityReview && user &&
+           user.reviewerRole !== "security" && user.role !== "admin" && (
+            <Card className="border-indigo-200 bg-indigo-50/30 dark:bg-indigo-950/10 dark:border-indigo-800">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                  <div>
+                    <p className="text-sm font-medium">Security Assessment Complete</p>
+                    <p className="text-xs text-muted-foreground">
+                      {Object.values((request as any).vendorSecurityReview as Record<string, string>).filter(v => v === "pass").length}/
+                      {Object.keys((request as any).vendorSecurityReview as Record<string, string>).length} questions passed
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Vendor Link Pending */}
           {(request as any).vendorQuestionnaireToken && !(request as any).vendorQuestionnaireCompleted && (
             <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
@@ -635,17 +739,51 @@ export default function RequestDetailPage() {
               <CardDescription>Approval workflow progress</CardDescription>
             </CardHeader>
             <CardContent className="space-y-0">
-              <ReviewStep label="Security Review" subtitle="Required" review={securityReview} />
-              <ProgressArrow status={securityReview?.decision} />
-              <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} />
-              <ProgressArrow status={techReview?.decision} />
-              <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} />
-              {strategicReview && (
+              {workflowSteps && workflowSteps.length > 0 ? (
                 <>
-                  <div className="mt-4 pt-3 border-t">
-                    <p className="text-xs text-muted-foreground mb-2">Advisory</p>
-                    <ReviewStep label="Strategic Review" subtitle="Advisory" review={strategicReview} optional />
-                  </div>
+                  {workflowSteps.map((step, i) => {
+                    const stepReviews = activeReviews.filter(r => r.reviewerRole === step.reviewerRole);
+                    const singleReview = stepReviews[0];
+                    const subtitle = step.required
+                      ? (step.minApprovals > 1 ? `${step.minApprovals} required` : "Required")
+                      : "Advisory";
+
+                    // Check if prior required steps are met for locking
+                    const priorRequired = workflowSteps.filter(s => s.required && s.sortOrder < step.sortOrder);
+                    const priorMet = priorRequired.every(prior => {
+                      const priorPasses = activeReviews.filter(r => r.reviewerRole === prior.reviewerRole && r.decision === "pass");
+                      return priorPasses.length >= prior.minApprovals;
+                    });
+                    const isLocked = !priorMet && request.status === "pending_reviews" && step.required;
+
+                    return (
+                      <div key={step.id}>
+                        {i > 0 && <ProgressArrow status={workflowSteps[i - 1] ? activeReviews.find(r => r.reviewerRole === workflowSteps[i - 1].reviewerRole)?.decision : undefined} />}
+                        {!step.required && (
+                          <div className="mt-4 pt-3 border-t">
+                            <p className="text-xs text-muted-foreground mb-2">Advisory</p>
+                          </div>
+                        )}
+                        <ReviewStep
+                          label={step.name}
+                          subtitle={subtitle}
+                          review={step.minApprovals <= 1 ? singleReview : undefined}
+                          reviews={step.minApprovals > 1 ? stepReviews : undefined}
+                          requireCount={step.minApprovals > 1 ? step.minApprovals : undefined}
+                          locked={isLocked}
+                          optional={!step.required}
+                        />
+                      </div>
+                    );
+                  })}
+                </>
+              ) : (
+                <>
+                  <ReviewStep label="Security Review" subtitle="Required" review={securityReview} />
+                  <ProgressArrow status={securityReview?.decision} />
+                  <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} />
+                  <ProgressArrow status={techReview?.decision} />
+                  <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} />
                 </>
               )}
             </CardContent>

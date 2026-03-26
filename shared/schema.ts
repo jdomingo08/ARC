@@ -95,6 +95,9 @@ export const requests = pgTable("requests", {
   vendorQuestionnaireToken: text("vendor_questionnaire_token"),
   vendorQuestionnaireCompleted: boolean("vendor_questionnaire_completed").default(false),
   vendorQuestionnaireData: jsonb("vendor_questionnaire_data"),
+  vendorSecurityReview: jsonb("vendor_security_review"),
+  vendorSecurityReviewerId: varchar("vendor_security_reviewer_id", { length: 36 }),
+  vendorSecurityReviewedAt: timestamp("vendor_security_reviewed_at"),
   platformId: varchar("platform_id", { length: 36 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -265,6 +268,18 @@ export const platformAttachments = pgTable("platform_attachments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const workflowSteps = pgTable("workflow_steps", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  reviewerRole: text("reviewer_role").notNull(),
+  sortOrder: integer("sort_order").notNull(),
+  required: boolean("required").notNull().default(true),
+  minApprovals: integer("min_approvals").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({ id: true, createdAt: true });
+
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
 export const insertReviewDecisionSchema = createInsertSchema(reviewDecisions).omit({ id: true, createdAt: true, superseded: true });
@@ -314,3 +329,5 @@ export type ExpirationAlert = typeof expirationAlerts.$inferSelect;
 export type InsertExpirationAlert = z.infer<typeof insertExpirationAlertSchema>;
 export type PlatformAttachment = typeof platformAttachments.$inferSelect;
 export type InsertPlatformAttachment = z.infer<typeof insertPlatformAttachmentSchema>;
+export type WorkflowStep = typeof workflowSteps.$inferSelect;
+export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
