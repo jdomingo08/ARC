@@ -394,7 +394,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/requests/:id/reviews", requireAuth, requireRole("reviewer", "chair"), async (req, res) => {
+  app.post("/api/requests/:id/reviews", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
     try {
       const user = (req as any).user as User;
       const request = await storage.getRequest(req.params.id);
