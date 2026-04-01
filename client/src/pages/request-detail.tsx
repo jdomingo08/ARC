@@ -239,7 +239,7 @@ export default function RequestDetailPage() {
   }
 
   const activeReviews = reviews?.filter(r => !r.superseded) || [];
-  const canReview = user && (user.role === "reviewer" || user.role === "chair") && request.status === "pending_reviews";
+  const canReview = user && (user.role === "reviewer" || user.role === "chair" || (user.role === "admin" && !!user.reviewerRole)) && request.status === "pending_reviews";
 
   const securityReview = activeReviews.find(r => r.reviewerRole === "security");
   const techReview = activeReviews.find(r => r.reviewerRole === "technical_financial");

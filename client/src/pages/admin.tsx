@@ -570,7 +570,6 @@ function UsersTab() {
                 <p className="text-xs text-muted-foreground">{u.email} - {u.department}</p>
               </div>
               <div className="flex items-center gap-2">
-                {u.reviewerRole && <RoleBadge role={u.reviewerRole} />}
                 <Select value={u.role} onValueChange={v => updateRoleMutation.mutate({ id: u.id, role: v })}>
                   <SelectTrigger className="w-[130px]" data-testid={`select-role-${u.id}`}>
                     <SelectValue />
@@ -582,6 +581,23 @@ function UsersTab() {
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
+                {(u.role === "reviewer" || u.role === "chair" || u.role === "admin") && (
+                  <Select
+                    value={u.reviewerRole || "none"}
+                    onValueChange={v => updateRoleMutation.mutate({ id: u.id, role: u.role, reviewerRole: v === "none" ? "" : v })}
+                  >
+                    <SelectTrigger className="w-[170px]" data-testid={`select-reviewer-role-${u.id}`}>
+                      <SelectValue placeholder="Reviewer Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Reviewer Role</SelectItem>
+                      <SelectItem value="security">Security</SelectItem>
+                      <SelectItem value="technical_financial">Technical / Financial</SelectItem>
+                      <SelectItem value="strategic">Strategic</SelectItem>
+                      <SelectItem value="chair">Chair</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
                 {currentUser?.id !== u.id && (
                   <Button
                     variant="ghost"
