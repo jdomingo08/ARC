@@ -5,6 +5,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,6 +42,7 @@ import {
   Save,
   ShieldCheck,
   Clock,
+  HelpCircle,
 } from "lucide-react";
 import { getFilteredQuestions } from "@shared/vendor-questions";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -239,7 +241,13 @@ export default function RequestDetailPage() {
   }
 
   const activeReviews = reviews?.filter(r => !r.superseded) || [];
-  const canReview = user && (user.role === "reviewer" || user.role === "chair" || (user.role === "admin" && !!user.reviewerRole)) && request.status === "pending_reviews";
+  const isTargetedReviewer = !!(
+    user?.reviewerRole &&
+    request.status === "waiting_on_reviewer" &&
+    request.waitingOnRole === user.reviewerRole
+  );
+  const hasReviewerAccess = !!(user && (user.role === "reviewer" || user.role === "chair" || (user.role === "admin" && !!user.reviewerRole)));
+  const canReview = hasReviewerAccess && (request.status === "pending_reviews" || isTargetedReviewer);
 
   const securityReview = activeReviews.find(r => r.reviewerRole === "security");
   const techReview = activeReviews.find(r => r.reviewerRole === "technical_financial");
@@ -250,6 +258,14 @@ export default function RequestDetailPage() {
   const isAdmin = user?.role === "admin";
   const isOwner = user?.id === request.requesterId;
   const canEdit = !request.locked ? (isOwner || isAdmin) : isAdmin;
+
+  // Needs-more-info decisions directed at the current user (requester or targeted reviewer)
+  const needsMoreInfoForMe = activeReviews.filter(r =>
+    r.decision === "needs_more_info" && (
+      (request.status === "waiting_on_requester" && isOwner) ||
+      (isTargetedReviewer && r.routedToRole === user?.reviewerRole)
+    )
+  );
 
   const startEditing = () => {
     setEditData({
@@ -348,8 +364,37 @@ export default function RequestDetailPage() {
               {resubmitMutation.isPending ? "Resubmitting..." : "Resubmit for Review"}
             </Button>
           )}
+          {isTargetedReviewer && (
+            <Button onClick={() => resubmitMutation.mutate()} disabled={resubmitMutation.isPending} data-testid="button-respond">
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              {resubmitMutation.isPending ? "Sending..." : "Respond to Review"}
+            </Button>
+          )}
         </div>
       </div>
+
+      {needsMoreInfoForMe.length > 0 && (
+        <div className="space-y-3">
+          {needsMoreInfoForMe.map(r => {
+            const stepName = workflowSteps?.find(s => s.reviewerRole === r.reviewerRole)?.name
+              || r.reviewerRole.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+            return (
+              <Alert key={r.id} className="border-amber-400 bg-amber-50 dark:bg-amber-950/20">
+                <HelpCircle className="h-4 w-4 text-amber-600" />
+                <AlertTitle className="text-amber-800 dark:text-amber-400">
+                  Additional Information Requested by {stepName}
+                </AlertTitle>
+                <AlertDescription className="text-amber-700 dark:text-amber-300 space-y-1">
+                  <p>{r.rationale}</p>
+                  {r.riskNotes && (
+                    <p className="font-medium">Risk Notes: {r.riskNotes}</p>
+                  )}
+                </AlertDescription>
+              </Alert>
+            );
+          })}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -705,6 +750,7 @@ export default function RequestDetailPage() {
               canChairApprove={canChairApprove}
               securityPassed={!!securityReview && securityReview.decision === "pass"}
               techPassed={!!techReview && techReview.decision === "pass"}
+              workflowSteps={workflowSteps || []}
             />
           )}
         </div>

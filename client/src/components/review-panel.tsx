@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle2, XCircle, HelpCircle, AlertTriangle } from "lucide-react";
+import type { WorkflowStep } from "@shared/schema";
 
 interface ReviewPanelProps {
   requestId: string;
@@ -17,14 +19,16 @@ interface ReviewPanelProps {
   canChairApprove: boolean;
   securityPassed: boolean;
   techPassed: boolean;
+  workflowSteps: WorkflowStep[];
 }
 
-export function ReviewPanel({ requestId, userReviewerRole, userRole, canChairApprove, securityPassed, techPassed }: ReviewPanelProps) {
+export function ReviewPanel({ requestId, userReviewerRole, userRole, canChairApprove, securityPassed, techPassed, workflowSteps }: ReviewPanelProps) {
   const { toast } = useToast();
   const [decision, setDecision] = useState("");
   const [rationale, setRationale] = useState("");
   const [riskNotes, setRiskNotes] = useState("");
   const [conditions, setConditions] = useState("");
+  const [routedToRole, setRoutedToRole] = useState("requester");
 
   const isChair = userRole === "chair";
   const chairBlocked = isChair && !canChairApprove;
@@ -37,6 +41,7 @@ export function ReviewPanel({ requestId, userReviewerRole, userRole, canChairApp
         riskNotes: riskNotes || null,
         conditions: conditions || null,
         reviewerRole: userReviewerRole,
+        routedToRole: decision === "needs_more_info" ? routedToRole : undefined,
       });
       return res.json();
     },
@@ -49,11 +54,15 @@ export function ReviewPanel({ requestId, userReviewerRole, userRole, canChairApp
       setRationale("");
       setRiskNotes("");
       setConditions("");
+      setRoutedToRole("requester");
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  // Other reviewer roles in the workflow (excluding the current reviewer's own role)
+  const otherSteps = workflowSteps.filter(s => s.reviewerRole !== userReviewerRole);
 
   return (
     <Card>
@@ -95,6 +104,25 @@ export function ReviewPanel({ requestId, userReviewerRole, userRole, canChairApp
             </div>
           </RadioGroup>
         </div>
+
+        {decision === "needs_more_info" && (
+          <div className="space-y-2">
+            <Label htmlFor="routed-to">Request information from *</Label>
+            <Select value={routedToRole} onValueChange={setRoutedToRole}>
+              <SelectTrigger id="routed-to" data-testid="select-routed-to">
+                <SelectValue placeholder="Select who needs to provide information" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="requester">Original Requester</SelectItem>
+                {otherSteps.map(step => (
+                  <SelectItem key={step.reviewerRole} value={step.reviewerRole}>
+                    {step.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="rationale">Rationale *</Label>
