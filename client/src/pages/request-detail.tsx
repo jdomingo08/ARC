@@ -819,15 +819,43 @@ export default function RequestDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {auditLogs.slice(0, 10).map(log => (
-                    <div key={log.id} className="flex items-start gap-2 text-sm">
-                      <div className="w-2 h-2 rounded-full bg-muted-foreground mt-1.5 shrink-0" />
-                      <div>
-                        <p className="font-medium">{log.action.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</p>
+                  {auditLogs.map(log => {
+                    const after = log.after as Record<string, any> | null;
+                    const fmtRole = (r: string) => r.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+                    let title = log.action.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+                    let detail: string | null = null;
+
+                    if (log.action === "routed_to_reviewer" && after) {
+                      title = "Routed to Reviewer";
+                      detail = `${fmtRole(after.requestedBy ?? "")} requested info from ${fmtRole(after.waitingOnRole ?? "")}`;
+                    } else if (log.action === "waiting_on_requester" && after) {
+                      title = "Waiting on Requester";
+                      detail = `${fmtRole(after.requestedBy ?? "")} requested additional information from the requester`;
+                    } else if (log.action === "review_needs_more_info" && after) {
+                      const target = after.routedToRole === "requester" ? "Original Requester" : fmtRole(after.routedToRole ?? "requester");
+                      detail = `${fmtRole(after.reviewerRole ?? "")} → ${target}: "${after.rationale}"`;
+                    } else if (log.action === "review_pass" && after) {
+                      detail = `${fmtRole(after.reviewerRole ?? "")} approved`;
+                    } else if (log.action === "review_fail" && after) {
+                      detail = `${fmtRole(after.reviewerRole ?? "")} rejected: "${after.rationale}"`;
+                    } else if (log.action === "approved" && after) {
+                      title = "Request Approved";
+                      detail = `All required reviews complete — final sign-off by ${fmtRole(after.finalReviewerRole ?? "")}`;
+                    } else if (log.action === "resubmitted") {
+                      detail = "Returned to pending reviews";
+                    }
+
+                    return (
+                      <div key={log.id} className="flex items-start gap-2 text-sm">
+                        <div className="w-2 h-2 rounded-full bg-muted-foreground mt-1.5 shrink-0" />
+                        <div>
+                          <p className="font-medium">{title}</p>
+                          {detail && <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>}
+                          <p className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
