@@ -123,9 +123,34 @@ app.use((req, res, next) => {
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
 
-  try {
-    execSync(`fuser -k ${port}/tcp 2>/dev/null || true`);
-  } catch {}
+  function killPortHolder(p: number): void {
+    try {
+      const hex = p.toString(16).toUpperCase().padStart(4, "0");
+      const tcp = execSync("cat /proc/net/tcp 2>/dev/null || true").toString();
+      const lines = tcp.split("\n");
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 4) continue;
+        const [, localAddr, , state] = parts;
+        if (state !== "0A") continue;
+        const port = localAddr.split(":")[1];
+        if (port !== hex) continue;
+        const inode = parts[9];
+        if (!inode || inode === "0") continue;
+        const pids = execSync(`for f in /proc/[0-9]*/fd/*; do readlink "$f" 2>/dev/null | grep -q "socket:\\[${inode}\\]" && echo "$f"; done || true`).toString();
+        for (const fdPath of pids.split("\n").filter(Boolean)) {
+          const pid = fdPath.split("/")[2];
+          if (pid && pid !== String(process.pid)) {
+            log(`Killing old process ${pid} holding port ${p}`);
+            try { process.kill(Number(pid), "SIGKILL"); } catch {}
+          }
+        }
+      }
+    } catch {}
+  }
+
+  killPortHolder(port);
+  await new Promise((r) => setTimeout(r, 500));
 
   httpServer.listen(
     {
