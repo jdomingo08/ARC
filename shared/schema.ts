@@ -9,7 +9,7 @@ export type UserRole = z.infer<typeof userRoleEnum>;
 export const reviewerRoleEnum = z.enum(["security", "technical_financial", "strategic", "chair"]);
 export type ReviewerRole = z.infer<typeof reviewerRoleEnum>;
 
-export const requestStatusEnum = z.enum(["draft", "pending_reviews", "waiting_on_requester", "approved", "rejected"]);
+export const requestStatusEnum = z.enum(["draft", "pending_reviews", "waiting_on_requester", "waiting_on_reviewer", "approved", "rejected"]);
 export type RequestStatus = z.infer<typeof requestStatusEnum>;
 
 export const platformStatusEnum = z.enum(["on_review", "approved", "rejected", "retired"]);
@@ -99,6 +99,7 @@ export const requests = pgTable("requests", {
   vendorSecurityReviewerId: varchar("vendor_security_reviewer_id", { length: 36 }),
   vendorSecurityReviewedAt: timestamp("vendor_security_reviewed_at"),
   platformId: varchar("platform_id", { length: 36 }),
+  waitingOnRole: text("waiting_on_role"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -112,6 +113,7 @@ export const reviewDecisions = pgTable("review_decisions", {
   rationale: text("rationale").notNull(),
   riskNotes: text("risk_notes"),
   conditions: text("conditions"),
+  routedToRole: text("routed_to_role"),
   superseded: boolean("superseded").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
