@@ -756,6 +756,12 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_security_reviewed_at TIMESTAMP;
     `).catch(() => { /* columns may already exist */ });
 
+    // Migrate tool_category from TEXT to TEXT[] for multi-select support
+    await pool.query(`
+      ALTER TABLE requests ALTER COLUMN tool_category TYPE TEXT[]
+        USING CASE WHEN tool_category IS NULL THEN NULL ELSE ARRAY[tool_category] END;
+    `).catch(() => { /* column may already be TEXT[] */ });
+
     // Add reviewer-to-reviewer routing columns
     await pool.query(`
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS waiting_on_role TEXT;

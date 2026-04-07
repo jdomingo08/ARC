@@ -79,7 +79,7 @@ export const requests = pgTable("requests", {
   dataTraining: text("data_training"),
   loginMethod: text("login_method").notNull(),
   division: text("division"),
-  toolCategory: text("tool_category"),
+  toolCategory: text("tool_category").array(),
   toolCategoryOther: text("tool_category_other"),
   alreadyInUse: text("already_in_use"),
   authorizedRequestor: boolean("authorized_requestor").default(false),
