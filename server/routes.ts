@@ -328,10 +328,18 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
 
-      const updated = await storage.updateRequest(req.params.id, req.body);
+      // When returning to pending_reviews from a waiting state, clear waitingOnRole
+      const body = req.body;
+      if (body.status === "pending_reviews" &&
+          (before.status === "waiting_on_requester" || before.status === "waiting_on_reviewer")) {
+        body.waitingOnRole = null;
+      }
+
+      const updated = await storage.updateRequest(req.params.id, body);
       if (!updated) return res.status(404).json({ message: "Request not found" });
 
-      if (req.body.status === "pending_reviews" && before.status === "waiting_on_requester") {
+      if (body.status === "pending_reviews" &&
+          (before.status === "waiting_on_requester" || before.status === "waiting_on_reviewer")) {
         await storage.createAuditLog({
           entityType: "request",
           entityId: updated.id,
@@ -399,11 +407,14 @@ export async function registerRoutes(
       const user = (req as any).user as User;
       const request = await storage.getRequest(req.params.id);
       if (!request) return res.status(404).json({ message: "Request not found" });
-      if (request.status !== "pending_reviews") {
+      if (request.status !== "pending_reviews" && request.status !== "waiting_on_reviewer") {
         return res.status(400).json({ message: "Request is not pending reviews" });
       }
+      if (request.status === "waiting_on_reviewer" && request.waitingOnRole !== user.reviewerRole) {
+        return res.status(403).json({ message: "This request is waiting on a different reviewer" });
+      }
 
-      const { decision, rationale, riskNotes, conditions } = req.body;
+      const { decision, rationale, riskNotes, conditions, routedToRole } = req.body;
       if (!decision || !rationale) {
         return res.status(400).json({ message: "Decision and rationale are required" });
       }
@@ -439,6 +450,7 @@ export async function registerRoutes(
         rationale,
         riskNotes: riskNotes || null,
         conditions: conditions || null,
+        routedToRole: decision === "needs_more_info" ? (routedToRole || "requester") : null,
       });
 
       await storage.createAuditLog({
@@ -451,7 +463,12 @@ export async function registerRoutes(
       });
 
       if (decision === "needs_more_info") {
-        await storage.updateRequestStatus(req.params.id, "waiting_on_requester");
+        const target = routedToRole && routedToRole !== "requester" ? routedToRole : null;
+        if (target) {
+          await storage.updateRequest(req.params.id, { status: "waiting_on_reviewer", waitingOnRole: target });
+        } else {
+          await storage.updateRequest(req.params.id, { status: "waiting_on_requester", waitingOnRole: null });
+        }
       } else if (decision === "fail") {
         await storage.updateRequestStatus(req.params.id, "rejected");
         await storage.updateRequest(req.params.id, { locked: true });

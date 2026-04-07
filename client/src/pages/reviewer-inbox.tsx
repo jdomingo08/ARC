@@ -16,8 +16,15 @@ export default function ReviewerInboxPage() {
     new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   const draftRequests = requests?.filter(r => r.status === "draft") || [];
-  const pendingRequests = requests?.filter(r => r.status === "pending_reviews") || [];
-  const completedRequests = requests?.filter(r => r.status !== "pending_reviews" && r.status !== "draft") || [];
+  const pendingRequests = requests?.filter(r =>
+    r.status === "pending_reviews" ||
+    (r.status === "waiting_on_reviewer" && r.waitingOnRole === user?.reviewerRole)
+  ) || [];
+  const completedRequests = requests?.filter(r =>
+    r.status !== "pending_reviews" &&
+    r.status !== "draft" &&
+    !(r.status === "waiting_on_reviewer" && r.waitingOnRole === user?.reviewerRole)
+  ) || [];
 
   if (reqLoading) {
     return (

@@ -756,6 +756,12 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE requests ADD COLUMN IF NOT EXISTS vendor_security_reviewed_at TIMESTAMP;
     `).catch(() => { /* columns may already exist */ });
 
+    // Add reviewer-to-reviewer routing columns
+    await pool.query(`
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS waiting_on_role TEXT;
+      ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS routed_to_role TEXT;
+    `).catch(() => { /* columns may already exist */ });
+
     // Create workflow_steps table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS workflow_steps (
