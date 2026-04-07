@@ -5,6 +5,20 @@ import { createServer } from "http";
 import { RiskScheduler } from "./risk-agent/scheduler";
 import { AlertScheduler } from "./alert-scheduler";
 import { storage } from "./storage";
+import { reviewerRoleEnum } from "@shared/schema";
+
+// Validate ADMIN_REVIEWER_ROLE at startup so misconfigurations surface immediately
+// rather than silently writing an invalid role to the database.
+const rawAdminReviewerRole = process.env.ADMIN_REVIEWER_ROLE;
+if (rawAdminReviewerRole) {
+  const result = reviewerRoleEnum.safeParse(rawAdminReviewerRole);
+  if (!result.success) {
+    const valid = reviewerRoleEnum.options.join(", ");
+    throw new Error(
+      `Invalid ADMIN_REVIEWER_ROLE="${rawAdminReviewerRole}". Must be one of: ${valid}`
+    );
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);
