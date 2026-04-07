@@ -43,7 +43,7 @@ const defaultFormData = {
   estimatedUsers: "individual",
   estimatedUsersCount: "",
   division: "",
-  toolCategory: "",
+  toolCategory: [] as string[],
   toolCategoryOther: "",
   alreadyInUse: "new_request",
   authorizedRequestor: false,
@@ -107,7 +107,7 @@ export default function NewRequestPage() {
         estimatedUsers: existingDraft.estimatedUsers || "individual",
         estimatedUsersCount: existingDraft.estimatedUsersCount?.toString() || "",
         division: (existingDraft as any).division || "",
-        toolCategory: (existingDraft as any).toolCategory || "",
+        toolCategory: (existingDraft as any).toolCategory || [],
         toolCategoryOther: (existingDraft as any).toolCategoryOther || "",
         alreadyInUse: (existingDraft as any).alreadyInUse || "new_request",
         authorizedRequestor: (existingDraft as any).authorizedRequestor || false,
@@ -228,8 +228,8 @@ export default function NewRequestPage() {
 
   const canSubmit = () => {
     return formData.requesterName && formData.department && formData.toolName && formData.primaryGoal
-      && formData.division && formData.toolCategory
-      && (formData.toolCategory !== "other" || formData.toolCategoryOther)
+      && formData.division && formData.toolCategory.length > 0
+      && (!formData.toolCategory.includes("other") || formData.toolCategoryOther)
       && formData.alreadyInUse && formData.authorizedRequestor
       && formData.trainingPlan && formData.aiPolicyAcknowledged
       && formData.useCaseType && formData.impactLevel
@@ -401,19 +401,40 @@ export default function NewRequestPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Tool Type / Category *</Label>
-                    <Select value={formData.toolCategory} onValueChange={v => { updateField("toolCategory", v); if (v !== "other") updateField("toolCategoryOther", ""); }}>
-                      <SelectTrigger data-testid="select-tool-category"><SelectValue placeholder="Select category" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="productivity">Productivity</SelectItem>
-                        <SelectItem value="creative">Creative</SelectItem>
-                        <SelectItem value="analytics">Analytics</SelectItem>
-                        <SelectItem value="agentic">Agentic</SelectItem>
-                        <SelectItem value="adtech">Adtech</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {formData.toolCategory === "other" && (
+                    <Label>Tool Type / Category * <span className="text-xs text-muted-foreground">(select all that apply)</span></Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: "productivity", label: "Productivity & Workflow" },
+                        { value: "analytics", label: "Analytics & Reporting" },
+                        { value: "creative", label: "Creative & Content Generation" },
+                        { value: "agentic", label: "Agentic & AI Automation" },
+                        { value: "communication", label: "Communication & Collaboration" },
+                        { value: "data_management", label: "Data Management & Integration" },
+                        { value: "developer_tools", label: "Developer & Engineering Tools" },
+                        { value: "security", label: "Security & Compliance" },
+                        { value: "customer_experience", label: "Customer Experience" },
+                        { value: "hr_people_ops", label: "HR & People Operations" },
+                        { value: "marketing_adtech", label: "Marketing & Adtech" },
+                        { value: "finance", label: "Finance & Budgeting" },
+                        { value: "other", label: "Other" },
+                      ].map(({ value, label }) => (
+                        <div key={value} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`cat-${value}`}
+                            checked={formData.toolCategory.includes(value)}
+                            onCheckedChange={() => {
+                              if (value === "other" && formData.toolCategory.includes("other")) {
+                                updateField("toolCategoryOther", "");
+                              }
+                              toggleArrayField("toolCategory", value);
+                            }}
+                            data-testid={`checkbox-tool-category-${value}`}
+                          />
+                          <label htmlFor={`cat-${value}`} className="text-sm cursor-pointer">{label}</label>
+                        </div>
+                      ))}
+                    </div>
+                    {formData.toolCategory.includes("other") && (
                       <Input
                         value={formData.toolCategoryOther}
                         onChange={e => updateField("toolCategoryOther", e.target.value)}
