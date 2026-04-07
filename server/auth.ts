@@ -66,7 +66,7 @@ export function configurePassport() {
             // Promote existing user to admin if they're in the admin list but aren't admin yet
             if (user && isAdmin && user.role !== "admin") {
               const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
-              user = await storage.updateUserRole(user.id, "admin", adminReviewerRole) || user;
+              user = await storage.updateUserRole(user.id, "admin", !user.reviewerRole ? adminReviewerRole : undefined) || user;
             }
 
             if (!user) {
