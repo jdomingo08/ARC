@@ -458,7 +458,12 @@ export async function registerRoutes(
         entityId: req.params.id,
         action: `review_${decision}`,
         before: null,
-        after: { reviewerRole, decision, rationale },
+        after: {
+          reviewerRole,
+          decision,
+          rationale,
+          ...(decision === "needs_more_info" && { routedToRole: routedToRole || "requester" }),
+        },
         actorId: user.id,
       });
 
@@ -466,8 +471,24 @@ export async function registerRoutes(
         const target = routedToRole && routedToRole !== "requester" ? routedToRole : null;
         if (target) {
           await storage.updateRequest(req.params.id, { status: "waiting_on_reviewer", waitingOnRole: target });
+          await storage.createAuditLog({
+            entityType: "request",
+            entityId: req.params.id,
+            action: "routed_to_reviewer",
+            before: { status: "pending_reviews" },
+            after: { status: "waiting_on_reviewer", waitingOnRole: target, requestedBy: reviewerRole },
+            actorId: user.id,
+          });
         } else {
           await storage.updateRequest(req.params.id, { status: "waiting_on_requester", waitingOnRole: null });
+          await storage.createAuditLog({
+            entityType: "request",
+            entityId: req.params.id,
+            action: "waiting_on_requester",
+            before: { status: "pending_reviews" },
+            after: { status: "waiting_on_requester", requestedBy: reviewerRole },
+            actorId: user.id,
+          });
         }
       } else if (decision === "fail") {
         await storage.updateRequestStatus(req.params.id, "rejected");
@@ -488,6 +509,14 @@ export async function registerRoutes(
         if (allRequiredMet) {
           await storage.updateRequestStatus(req.params.id, "approved");
           await storage.updateRequest(req.params.id, { locked: true });
+          await storage.createAuditLog({
+            entityType: "request",
+            entityId: req.params.id,
+            action: "approved",
+            before: { status: "pending_reviews" },
+            after: { status: "approved", finalReviewerRole: reviewerRole },
+            actorId: user.id,
+          });
           if (request.platformId) {
             const allConditions = activeReviews.filter(r => r.conditions).map(r => r.conditions).join("; ");
             await storage.updatePlatform(request.platformId, {
