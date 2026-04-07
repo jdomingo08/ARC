@@ -381,6 +381,41 @@ export async function registerRoutes(
     }
   });
 
+  // Admin override: clear waiting status and re-route to a specific review stage (admin only)
+  app.post("/api/requests/:id/admin-clear-waiting", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      if (request.status !== "waiting_on_requester" && request.status !== "waiting_on_reviewer") {
+        return res.status(400).json({ message: "Admin override only applies to requests in a waiting status" });
+      }
+
+      const { targetReviewerRole } = req.body;
+      const validRoles = ["security", "technical_financial", "strategic", "chair"];
+      if (!targetReviewerRole || !validRoles.includes(targetReviewerRole)) {
+        return res.status(400).json({ message: "targetReviewerRole must be one of: security, technical_financial, strategic, chair" });
+      }
+
+      const previousStatus = request.status;
+      const updated = await storage.updateRequest(req.params.id, { status: "pending_reviews", waitingOnRole: null });
+
+      await storage.createAuditLog({
+        entityType: "request",
+        entityId: req.params.id,
+        action: "admin_override",
+        before: { status: previousStatus },
+        after: { status: "pending_reviews", from: previousStatus, targetReviewerRole },
+        actorId: user.id,
+      });
+
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Delete request (admin only)
   app.delete("/api/requests/:id", requireAuth, requireRole("admin"), async (req, res) => {
     try {

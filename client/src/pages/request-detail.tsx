@@ -58,6 +58,7 @@ export default function RequestDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Request>>({});
   const [commentText, setCommentText] = useState("");
+  const [adminOverrideRole, setAdminOverrideRole] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: request, isLoading } = useQuery<Request>({
@@ -157,6 +158,23 @@ export default function RequestDetailPage() {
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const adminOverrideMutation = useMutation({
+    mutationFn: async (targetReviewerRole: string) => {
+      const res = await apiRequest("POST", `/api/requests/${id}/admin-clear-waiting`, { targetReviewerRole });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Admin Override Applied", description: "Request returned to pending reviews." });
+      setAdminOverrideRole("");
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/audit", "request", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Override Failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -342,6 +360,45 @@ export default function RequestDetailPage() {
             >
               <Trash2 className="h-4 w-4 mr-1" /> Delete
             </Button>
+          )}
+          {isAdmin && (request.status === "waiting_on_requester" || request.status === "waiting_on_reviewer") && (
+            <>
+              <Select value={adminOverrideRole} onValueChange={setAdminOverrideRole}>
+                <SelectTrigger className="h-8 w-48 text-sm">
+                  <SelectValue placeholder="Route to stage..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {(workflowSteps && workflowSteps.length > 0
+                    ? workflowSteps.map(s => ({ value: s.reviewerRole, label: s.name }))
+                    : [
+                        { value: "security", label: "Security" },
+                        { value: "technical_financial", label: "Technical / Financial" },
+                        { value: "strategic", label: "Strategic" },
+                        { value: "chair", label: "Chair" },
+                      ]
+                  ).map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (!adminOverrideRole) {
+                    toast({ title: "Select a review stage first", variant: "destructive" });
+                    return;
+                  }
+                  if (window.confirm(`Override waiting status and send to ${adminOverrideRole.replace(/_/g, " ")} review?`)) {
+                    adminOverrideMutation.mutate(adminOverrideRole);
+                  }
+                }}
+                disabled={adminOverrideMutation.isPending || !adminOverrideRole}
+              >
+                <ShieldCheck className="h-4 w-4 mr-1" />
+                {adminOverrideMutation.isPending ? "Overriding..." : "Override & Send to Review"}
+              </Button>
+            </>
           )}
           {canEdit && !editing && (
             <Button variant="outline" size="sm" onClick={startEditing}>
@@ -843,6 +900,11 @@ export default function RequestDetailPage() {
                       detail = `All required reviews complete — final sign-off by ${fmtRole(after.finalReviewerRole ?? "")}`;
                     } else if (log.action === "resubmitted") {
                       detail = "Returned to pending reviews";
+                    } else if (log.action === "admin_override" && after) {
+                      title = "Admin Override";
+                      const target = after.targetReviewerRole ? fmtRole(after.targetReviewerRole) : "Review";
+                      const from = after.from ? fmtRole(after.from) : "waiting";
+                      detail = `Admin cleared ${from} → ${target} Review`;
                     }
 
                     return (
