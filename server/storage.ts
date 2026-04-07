@@ -500,7 +500,20 @@ export class DatabaseStorage implements IStorage {
     }
 
     const existingUsers = await db.select().from(users);
-    if (existingUsers.length > 0) return;
+
+    // Runtime migration: ensure admin users have a reviewer role assigned.
+    // Covers the case where an admin was auto-provisioned via OAuth before
+    // ADMIN_REVIEWER_ROLE was configured, leaving reviewerRole null.
+    if (existingUsers.length > 0) {
+      const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
+      const adminsWithoutRole = existingUsers.filter(u => u.role === "admin" && !u.reviewerRole);
+      for (const adminUser of adminsWithoutRole) {
+        await db.update(users)
+          .set({ reviewerRole: adminReviewerRole })
+          .where(eq(users.id, adminUser.id));
+      }
+      return;
+    }
 
     const seedUsers: InsertUser[] = [
       { name: "LeaAnna Hernandez", email: "leaanna.hernandez@entravision.com", department: "AI Strategy", role: "chair", reviewerRole: "strategic" },
