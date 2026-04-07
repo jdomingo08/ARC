@@ -53,20 +53,20 @@ export function configurePassport() {
             // Auto-provision new users with allowed domain
             if (!user && allowedDomain && email.endsWith(`@${allowedDomain}`)) {
               const displayName = profile.displayName || email.split("@")[0];
-              const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE;
+              const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
               user = await storage.createUser({
                 name: displayName,
                 email,
                 department: "General",
                 role: isAdmin ? "admin" : "requester",
-                reviewerRole: isAdmin && adminReviewerRole ? adminReviewerRole : undefined,
+                reviewerRole: isAdmin ? adminReviewerRole : undefined,
               });
             }
 
             // Promote existing user to admin if they're in the admin list but aren't admin yet
             if (user && isAdmin && user.role !== "admin") {
-              const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE;
-              user = await storage.updateUserRole(user.id, "admin", adminReviewerRole || undefined) || user;
+              const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
+              user = await storage.updateUserRole(user.id, "admin", adminReviewerRole) || user;
             }
 
             if (!user) {
