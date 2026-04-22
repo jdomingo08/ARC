@@ -288,7 +288,14 @@ export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
-export const adminEditRequestSchema = insertRequestSchema.partial();
+export const adminEditRequestSchema = insertRequestSchema
+  .partial()
+  .extend({
+    // drizzle-zod 0.7 generates z.string() for text().array() columns; override explicitly.
+    toolCategory: z.array(z.string()).nullable().optional(),
+    compatibility: z.array(z.string()).nullable().optional(),
+    dataInput: z.array(z.string()).nullable().optional(),
+  });
 export const insertReviewDecisionSchema = createInsertSchema(reviewDecisions).omit({ id: true, createdAt: true, superseded: true });
 export const insertPlatformSchema = createInsertSchema(platforms).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAttributeDefinitionSchema = createInsertSchema(platformAttributeDefinitions).omit({ id: true, createdAt: true });
