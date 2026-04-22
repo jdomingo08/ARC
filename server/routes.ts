@@ -12,6 +12,7 @@ import { RiskScanner } from "./risk-agent/scanner";
 import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
 import type { User, PlatformAttributeDefinition } from "@shared/schema";
+import { adminEditRequestSchema } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -346,6 +347,63 @@ export async function registerRoutes(
           action: "resubmitted",
           before: { status: before.status },
           after: { status: updated.status },
+          actorId: user.id,
+        });
+      }
+
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Admin full-form edit — updates any field on the original request without touching workflow state.
+  app.patch("/api/requests/:id/admin-edit", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const before = await storage.getRequest(req.params.id);
+      if (!before) return res.status(404).json({ message: "Request not found" });
+
+      const parsed = adminEditRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.message });
+      }
+
+      // Defense in depth: drop workflow-state fields even if the client sent them.
+      const sanitized: Record<string, unknown> = { ...(parsed.data as Record<string, unknown>) };
+      delete sanitized.status;
+      delete sanitized.locked;
+      delete sanitized.waitingOnRole;
+      delete sanitized.requesterId;
+      delete sanitized.platformId;
+      delete sanitized.trackingId;
+      delete sanitized.vendorQuestionnaireToken;
+      delete sanitized.vendorQuestionnaireCompleted;
+      delete sanitized.vendorQuestionnaireData;
+      delete sanitized.vendorSecurityReview;
+      delete sanitized.vendorSecurityReviewerId;
+      delete sanitized.vendorSecurityReviewedAt;
+
+      const updated = await storage.updateRequest(req.params.id, sanitized);
+      if (!updated) return res.status(404).json({ message: "Request not found" });
+
+      const diffBefore: Record<string, unknown> = {};
+      const diffAfter: Record<string, unknown> = {};
+      for (const key of Object.keys(sanitized)) {
+        const b = (before as any)[key];
+        const a = (updated as any)[key];
+        if (JSON.stringify(b) !== JSON.stringify(a)) {
+          diffBefore[key] = b;
+          diffAfter[key] = a;
+        }
+      }
+      if (Object.keys(diffAfter).length > 0) {
+        await storage.createAuditLog({
+          entityType: "request",
+          entityId: updated.id,
+          action: "admin_edited",
+          before: diffBefore,
+          after: diffAfter,
           actorId: user.id,
         });
       }
