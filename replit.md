@@ -50,3 +50,11 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 
 ## Seed Data
 Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 risk findings, 3 attribute definitions
+
+## Auth Env Vars
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — enables Google SSO
+- `GOOGLE_CALLBACK_URL` — override the OAuth callback (defaults to `/api/auth/google/callback`)
+- `GOOGLE_ALLOWED_DOMAIN` — restricts SSO to one Workspace domain (e.g. `entravision.com`)
+- `GOOGLE_ALLOWED_EXTRA_EMAILS` — comma-separated emails that bypass `GOOGLE_ALLOWED_DOMAIN`. When set, the `hd` account-picker hint is dropped so personal Gmail accounts can appear. Server-side verify still rejects anything not on the domain or this list.
+- `ADMIN_EMAILS` — comma-separated emails auto-promoted to admin on first SSO login
+- `ADMIN_REVIEWER_ROLE` — reviewerRole assigned when auto-promoting admins (default `technical_financial`)

@@ -34,9 +34,16 @@ export function configurePassport() {
               return done(null, false, { message: "No email from Google" });
             }
 
+            // Per-email exceptions to the domain rule (e.g. external testers)
+            const extraAllowedEmails = (process.env.GOOGLE_ALLOWED_EXTRA_EMAILS || "")
+              .split(",")
+              .map((e) => e.trim().toLowerCase())
+              .filter(Boolean);
+            const isExtraAllowed = extraAllowedEmails.includes(email.toLowerCase());
+
             // Domain restriction (defense in depth — also set at GCP level)
             const allowedDomain = process.env.GOOGLE_ALLOWED_DOMAIN;
-            if (allowedDomain && !email.endsWith(`@${allowedDomain}`)) {
+            if (allowedDomain && !email.endsWith(`@${allowedDomain}`) && !isExtraAllowed) {
               return done(null, false, { message: "Email domain not allowed" });
             }
 
@@ -50,8 +57,8 @@ export function configurePassport() {
               .filter(Boolean);
             const isAdmin = adminEmails.includes(email.toLowerCase());
 
-            // Auto-provision new users with allowed domain
-            if (!user && allowedDomain && email.endsWith(`@${allowedDomain}`)) {
+            // Auto-provision new users with allowed domain or on the extras list
+            if (!user && (isExtraAllowed || (allowedDomain && email.endsWith(`@${allowedDomain}`)))) {
               const displayName = profile.displayName || email.split("@")[0];
               const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
               user = await storage.createUser({

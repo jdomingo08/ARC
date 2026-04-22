@@ -120,11 +120,14 @@ export async function registerRoutes(
 
   // Google SSO routes (only active when credentials are configured)
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    const hasExtraAllowedEmails = !!(process.env.GOOGLE_ALLOWED_EXTRA_EMAILS || "").trim();
     app.get(
       "/api/auth/google",
       passport.authenticate("google", {
         scope: ["email", "profile"],
-        hd: process.env.GOOGLE_ALLOWED_DOMAIN, // hint to show only Workspace accounts
+        // When extras are configured we need personal accounts in the picker,
+        // so drop the hd hint and let server-side verify enforce access.
+        ...(hasExtraAllowedEmails ? {} : { hd: process.env.GOOGLE_ALLOWED_DOMAIN }),
       } as any)
     );
 
