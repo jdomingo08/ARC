@@ -284,6 +284,7 @@ export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
+export const adminEditRequestSchema = insertRequestSchema.partial();
 export const insertReviewDecisionSchema = createInsertSchema(reviewDecisions).omit({ id: true, createdAt: true, superseded: true });
 export const insertPlatformSchema = createInsertSchema(platforms).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAttributeDefinitionSchema = createInsertSchema(platformAttributeDefinitions).omit({ id: true, createdAt: true });
@@ -303,6 +304,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Request = typeof requests.$inferSelect;
 export type InsertRequest = z.infer<typeof insertRequestSchema>;
+export type AdminEditRequest = z.infer<typeof adminEditRequestSchema>;
 export type ReviewDecision = typeof reviewDecisions.$inferSelect;
 export type InsertReviewDecision = z.infer<typeof insertReviewDecisionSchema>;
 export type Platform = typeof platforms.$inferSelect;

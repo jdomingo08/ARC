@@ -12,6 +12,7 @@ import { Loader2 } from "lucide-react";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
 import NewRequestPage from "@/pages/new-request";
+import EditRequestPage from "@/pages/edit-request";
 import MyRequestsPage from "@/pages/my-requests";
 import RequestDetailPage from "@/pages/request-detail";
 import ReviewerInboxPage from "@/pages/reviewer-inbox";
@@ -66,6 +67,7 @@ function AppContent() {
               <Switch>
                 <Route path="/" component={DashboardPage} />
                 <Route path="/requests/new" component={NewRequestPage} />
+                <Route path="/requests/:id/edit" component={EditRequestPage} />
                 <Route path="/requests/:id" component={RequestDetailPage} />
                 <Route path="/requests" component={MyRequestsPage} />
                 <Route path="/reviews" component={ReviewerInboxPage} />

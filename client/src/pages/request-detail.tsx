@@ -409,9 +409,16 @@ export default function RequestDetailPage() {
               </Button>
             </>
           )}
+          {isAdmin && !editing && (
+            <Link href={`/requests/${id}/edit`}>
+              <Button variant="outline" size="sm" data-testid="button-admin-full-edit">
+                <Pencil className="h-4 w-4 mr-1" /> Edit Full Request
+              </Button>
+            </Link>
+          )}
           {canEdit && !editing && (
             <Button variant="outline" size="sm" onClick={startEditing}>
-              <Pencil className="h-4 w-4 mr-1" /> Edit
+              <Pencil className="h-4 w-4 mr-1" /> Quick Edit
             </Button>
           )}
           {editing && (
@@ -989,6 +996,10 @@ export default function RequestDetailPage() {
                       const target = after.targetReviewerRole ? fmtRole(after.targetReviewerRole) : "Review";
                       const from = after.from ? fmtRole(after.from) : "waiting";
                       detail = `Admin cleared ${from} → ${target} Review`;
+                    } else if (log.action === "admin_edited" && after) {
+                      title = "Admin Edited Request";
+                      const fields = Object.keys(after).map(k => k.replace(/([A-Z])/g, " $1").replace(/^./, c => c.toUpperCase()).trim());
+                      detail = fields.length > 0 ? `Fields changed: ${fields.join(", ")}` : "No fields changed";
                     }
 
                     return (
