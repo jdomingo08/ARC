@@ -226,8 +226,12 @@ export const requestAttachments = pgTable("request_attachments", {
   fileSize: integer("file_size").notNull(),
   mimeType: text("mime_type"),
   storagePath: text("storage_path").notNull(),
+  section: text("section"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const requestAttachmentSectionEnum = z.enum(["basics", "strategic", "technical", "security"]);
+export type RequestAttachmentSection = z.infer<typeof requestAttachmentSectionEnum>;
 
 export const platformStakeholders = pgTable("platform_stakeholders", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),

@@ -10,6 +10,10 @@ import { User, Target, DollarSign, ShieldCheck } from "lucide-react";
 import type { Platform } from "@shared/schema";
 import { ToolInsightsFeed } from "@/components/tool-insights-feed";
 import { VendorQuestionnaire } from "@/components/vendor-questionnaire";
+import { SectionAttachments } from "@/components/section-attachments";
+import type { RequestAttachmentSection } from "@shared/schema";
+
+const SECTION_KEYS: RequestAttachmentSection[] = ["basics", "strategic", "technical", "security"];
 
 export const sections = [
   { title: "The Basics", icon: User, description: "Basic information about the tool request" },
@@ -114,11 +118,20 @@ export function RequestFormSections({
         <div className="flex-1 min-w-0">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                {(() => { const Icon = sections[step].icon; return <Icon className="h-5 w-5" />; })()}
-                {sections[step].title}
-              </CardTitle>
-              <CardDescription>{sections[step].description}</CardDescription>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <CardTitle className="flex items-center gap-2">
+                    {(() => { const Icon = sections[step].icon; return <Icon className="h-5 w-5" />; })()}
+                    {sections[step].title}
+                  </CardTitle>
+                  <CardDescription>{sections[step].description}</CardDescription>
+                </div>
+                <SectionAttachments
+                  section={SECTION_KEYS[step]}
+                  requestId={existingRequestId}
+                  onEnsureRequestId={mode === "create" ? onSaveDraft : undefined}
+                />
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               {step === 0 && (

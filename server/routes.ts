@@ -12,7 +12,7 @@ import { RiskScanner } from "./risk-agent/scanner";
 import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
 import type { User, PlatformAttributeDefinition } from "@shared/schema";
-import { adminEditRequestSchema } from "@shared/schema";
+import { adminEditRequestSchema, requestAttachmentSectionEnum } from "@shared/schema";
 
 const uploadDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -1072,6 +1072,9 @@ export async function registerRoutes(
       const file = req.file;
       if (!file) return res.status(400).json({ message: "No file uploaded" });
 
+      const sectionParsed = requestAttachmentSectionEnum.safeParse(req.body.section);
+      const section = sectionParsed.success ? sectionParsed.data : null;
+
       const attachment = await storage.createRequestAttachment({
         requestId: req.params.id,
         uploadedBy: user.id,
@@ -1080,6 +1083,7 @@ export async function registerRoutes(
         fileSize: file.size,
         mimeType: file.mimetype || null,
         storagePath: file.path,
+        section,
       });
       res.json(attachment);
     } catch (e: any) {

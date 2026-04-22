@@ -832,48 +832,71 @@ export default function RequestDetailPage() {
               <CardTitle className="text-lg flex items-center gap-2">
                 <Paperclip className="h-5 w-5" /> Attachments
               </CardTitle>
-              <CardDescription>Upload supporting documents</CardDescription>
+              <CardDescription>Supporting documents, grouped by request section so reviewers can see what was uploaded where.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {attachments && attachments.length > 0 ? (
-                <div className="space-y-2">
-                  {attachments.map(a => (
-                    <div key={a.id} className="flex items-center justify-between border rounded-md p-2 px-3">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{a.fileName}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatFileSize(a.fileSize)} &middot; {a.uploaderName} &middot; {formatDate(a.createdAt)}
-                          </p>
-                        </div>
+            <CardContent className="space-y-5">
+              {(() => {
+                const SECTION_LABELS: { key: string | null; label: string }[] = [
+                  { key: "basics", label: "The Basics" },
+                  { key: "strategic", label: "Strategic Fit & Use Case" },
+                  { key: "technical", label: "Technical & Financial" },
+                  { key: "security", label: "Security & Data Privacy" },
+                  { key: null, label: "General Attachments" },
+                ];
+                const renderAttachmentRow = (a: RequestAttachment) => (
+                  <div key={a.id} className="flex items-center justify-between border rounded-md p-2 px-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Paperclip className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{a.fileName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatFileSize(a.fileSize)} &middot; {a.uploaderName} &middot; {formatDate(a.createdAt)}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => window.open(`/api/attachments/${a.id}/download`, "_blank")}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      {(a.uploadedBy === user?.id || isAdmin) && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          onClick={() => window.open(`/api/attachments/${a.id}/download`, "_blank")}
+                          onClick={() => deleteAttachmentMutation.mutate(a.id)}
                         >
-                          <Download className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3" />
                         </Button>
-                        {(a.uploadedBy === user?.id || isAdmin) && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => deleteAttachmentMutation.mutate(a.id)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No attachments yet.</p>
-              )}
+                  </div>
+                );
+                const hasAny = attachments && attachments.length > 0;
+                if (!hasAny) {
+                  return <p className="text-sm text-muted-foreground">No attachments yet.</p>;
+                }
+                return (
+                  <div className="space-y-4">
+                    {SECTION_LABELS.map(({ key, label }) => {
+                      const group = (attachments || []).filter(a => (a.section ?? null) === key);
+                      if (group.length === 0) return null;
+                      return (
+                        <div key={label} className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {label} <span className="text-muted-foreground/70">({group.length})</span>
+                          </p>
+                          <div className="space-y-2">{group.map(renderAttachmentRow)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileUpload} />
               <Button
@@ -882,7 +905,7 @@ export default function RequestDetailPage() {
                 disabled={uploadMutation.isPending}
               >
                 <Upload className="h-4 w-4 mr-1" />
-                {uploadMutation.isPending ? "Uploading..." : "Upload File"}
+                {uploadMutation.isPending ? "Uploading..." : "Upload General File"}
               </Button>
             </CardContent>
           </Card>
