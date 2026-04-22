@@ -234,6 +234,12 @@ export default function RequestDetailPage() {
   const formatArray = (arr: string[] | null) =>
     arr?.map(s => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())).join(", ") || "N/A";
 
+  const formatLabel = (s: string | null | undefined, fallback = "Not provided") =>
+    s ? s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) : fallback;
+
+  const formatBool = (b: boolean | null | undefined) =>
+    b === true ? "Yes" : b === false ? "No" : "Not provided";
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -458,127 +464,202 @@ export default function RequestDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Request Details</CardTitle>
+              <CardDescription>All four sections of the request form, shown in full to every reviewer.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InfoRow icon={UserIcon} label="Requester" value={request.requesterName} />
-                <InfoRow icon={Building2} label="Department" value={request.department} />
-                {editing ? (
-                  <EditField
+            <CardContent className="space-y-6">
+              {/* Section 1: The Basics */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <UserIcon className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">The Basics</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InfoRow icon={UserIcon} label="Requester" value={request.requesterName} />
+                  <InfoRow icon={Building2} label="Department" value={request.department} />
+                  {editing ? (
+                    <EditField
+                      icon={Target}
+                      label="Primary Goal"
+                      value={editData.primaryGoal || ""}
+                      onChange={v => setEditData(d => ({ ...d, primaryGoal: v }))}
+                    />
+                  ) : (
+                    <InfoRow icon={Target} label="Primary Goal" value={request.primaryGoal || "Not provided"} />
+                  )}
+                  {editing ? (
+                    <div className="flex items-start gap-2">
+                      <Users className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground">Estimated Users</p>
+                        <Select value={editData.estimatedUsers || ""} onValueChange={v => setEditData(d => ({ ...d, estimatedUsers: v }))}>
+                          <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="individual">Individual</SelectItem>
+                            <SelectItem value="team">Team</SelectItem>
+                            <SelectItem value="department">Department</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <InfoRow icon={Users} label="Estimated Users" value={`${formatLabel(request.estimatedUsers)}${request.estimatedUsersCount ? ` (${request.estimatedUsersCount})` : ""}`} />
+                  )}
+                  <InfoRow icon={Building2} label="Division" value={formatLabel((request as any).division)} />
+                  <InfoRow
                     icon={Target}
-                    label="Primary Goal"
-                    value={editData.primaryGoal || ""}
-                    onChange={v => setEditData(d => ({ ...d, primaryGoal: v }))}
+                    label="Tool Category"
+                    value={
+                      (request as any).toolCategory && (request as any).toolCategory.length > 0
+                        ? `${formatArray((request as any).toolCategory)}${(request as any).toolCategoryOther ? ` — ${(request as any).toolCategoryOther}` : ""}`
+                        : "Not provided"
+                    }
                   />
-                ) : (
-                  <InfoRow icon={Target} label="Primary Goal" value={request.primaryGoal} />
-                )}
-                {editing ? (
-                  <div className="flex items-start gap-2">
-                    <Users className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs text-muted-foreground">Estimated Users</p>
-                      <Select value={editData.estimatedUsers || ""} onValueChange={v => setEditData(d => ({ ...d, estimatedUsers: v }))}>
-                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="individual">Individual</SelectItem>
-                          <SelectItem value="team">Team</SelectItem>
-                          <SelectItem value="department">Department</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                ) : (
-                  <InfoRow icon={Users} label="Estimated Users" value={`${request.estimatedUsers}${request.estimatedUsersCount ? ` (${request.estimatedUsersCount})` : ""}`} />
-                )}
+                  <InfoRow icon={Workflow} label="Already In Use" value={formatLabel((request as any).alreadyInUse)} />
+                  <InfoRow icon={CheckCircle2} label="Authorized Requestor" value={formatBool((request as any).authorizedRequestor)} />
+                  <InfoRow
+                    icon={CheckCircle2}
+                    label="Training Plan"
+                    value={
+                      (request as any).trainingPlan
+                        ? `${formatLabel((request as any).trainingPlan)}${(request as any).trainingPlanDetails ? ` — ${(request as any).trainingPlanDetails}` : ""}`
+                        : "Not provided"
+                    }
+                  />
+                  <InfoRow icon={CheckCircle2} label="AI Policy Acknowledged" value={formatBool((request as any).aiPolicyAcknowledged)} />
+                </div>
               </div>
+
               <Separator />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {editing ? (
-                  <EditField
-                    icon={Workflow}
-                    label="Workflow Integration"
-                    value={editData.workflowIntegration || ""}
-                    onChange={v => setEditData(d => ({ ...d, workflowIntegration: v }))}
+
+              {/* Section 2: Strategic Fit & Use Case */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Target className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Strategic Fit & Use Case</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InfoRow icon={Target} label="Use Case Type" value={formatLabel((request as any).useCaseType)} />
+                  {editing ? (
+                    <EditField
+                      icon={Workflow}
+                      label="Workflow Integration"
+                      value={editData.workflowIntegration || ""}
+                      onChange={v => setEditData(d => ({ ...d, workflowIntegration: v }))}
+                    />
+                  ) : (
+                    <InfoRow icon={Workflow} label="Workflow Integration" value={request.workflowIntegration || "Not provided"} />
+                  )}
+                  {editing ? (
+                    <div className="flex items-start gap-2">
+                      <Scale className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground">Impact Level</p>
+                        <Select value={editData.impactLevel || ""} onValueChange={v => setEditData(d => ({ ...d, impactLevel: v }))}>
+                          <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <InfoRow icon={Scale} label="Impact Level" value={<ImpactBadge level={request.impactLevel} />} />
+                  )}
+                  <InfoRow
+                    icon={Scale}
+                    label="Alternatives Evaluated"
+                    value={
+                      request.alternativesChecked
+                        ? (request.alternativesText || "Yes")
+                        : "No"
+                    }
                   />
-                ) : (
-                  <InfoRow icon={Workflow} label="Workflow Integration" value={request.workflowIntegration || "N/A"} />
-                )}
-                {editing ? (
-                  <div className="flex items-start gap-2">
-                    <Scale className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs text-muted-foreground">Impact Level</p>
-                      <Select value={editData.impactLevel || ""} onValueChange={v => setEditData(d => ({ ...d, impactLevel: v }))}>
-                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                ) : (
-                  <InfoRow icon={Scale} label="Impact Level" value={<ImpactBadge level={request.impactLevel} />} />
-                )}
-                <InfoRow icon={Monitor} label="Compatibility" value={formatArray(request.compatibility)} />
-                {editing ? (
-                  <div className="flex items-start gap-2">
-                    <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs text-muted-foreground">Annual Cost</p>
-                      <Input
-                        type="number"
-                        className="h-8 mt-1"
-                        value={editData.annualCost || ""}
-                        onChange={e => setEditData(d => ({ ...d, annualCost: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <InfoRow icon={DollarSign} label="Cost" value={request.annualCost ? `$${Number(request.annualCost).toLocaleString()}/yr (${request.costStructure?.replace(/_/g, " ")})` : "N/A"} />
-                )}
+                </div>
               </div>
+
               <Separator />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InfoRow icon={Database} label="Data Categories" value={formatArray(request.dataInput)} />
-                {editing ? (
-                  <div className="flex items-start gap-2">
-                    <Shield className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs text-muted-foreground">Data Training</p>
-                      <Select value={editData.dataTraining || ""} onValueChange={v => setEditData(d => ({ ...d, dataTraining: v }))}>
-                        <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="yes">Yes</SelectItem>
-                          <SelectItem value="no">No</SelectItem>
-                          <SelectItem value="unsure">Unsure</SelectItem>
-                        </SelectContent>
-                      </Select>
+
+              {/* Section 3: Technical & Financial */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Technical & Financial</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InfoRow icon={Monitor} label="Compatibility" value={formatArray(request.compatibility)} />
+                  <InfoRow icon={Monitor} label="Integration Requirements" value={request.compatibilityNotes || "Not provided"} />
+                  <InfoRow icon={DollarSign} label="Cost Structure" value={formatLabel(request.costStructure)} />
+                  {editing ? (
+                    <div className="flex items-start gap-2">
+                      <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground">Annual Cost</p>
+                        <Input
+                          type="number"
+                          className="h-8 mt-1"
+                          value={editData.annualCost || ""}
+                          onChange={e => setEditData(d => ({ ...d, annualCost: e.target.value }))}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <InfoRow icon={Shield} label="Data Training" value={request.dataTraining || "N/A"} />
-                )}
-                {editing ? (
-                  <EditField
-                    icon={Key}
-                    label="Login Method"
-                    value={editData.loginMethod || ""}
-                    onChange={v => setEditData(d => ({ ...d, loginMethod: v }))}
-                  />
-                ) : (
-                  <InfoRow icon={Key} label="Login Method" value={request.loginMethod} />
-                )}
-                <InfoRow icon={Calendar} label="Submitted" value={formatDate(request.createdAt)} />
+                  ) : (
+                    <InfoRow
+                      icon={DollarSign}
+                      label="Annual Cost"
+                      value={request.annualCost ? `$${Number(request.annualCost).toLocaleString()}/yr` : "Not provided"}
+                    />
+                  )}
+                  <InfoRow icon={DollarSign} label="Cost Notes" value={(request as any).costNotes || "Not provided"} />
+                  <InfoRow icon={UserIcon} label="Budget Owner" value={(request as any).budgetOwner || "Not provided"} />
+                  <InfoRow icon={Building2} label="Cost Center" value={(request as any).costCenter || "Not provided"} />
+                  <InfoRow icon={Target} label="Tier Assignment" value={formatLabel((request as any).tierAssignment, "Not assigned")} />
+                </div>
               </div>
-              {request.alternativesChecked && !editing && (
-                <>
-                  <Separator />
-                  <InfoRow icon={Scale} label="Alternatives Evaluated" value={request.alternativesText || "Yes"} />
-                </>
-              )}
+
+              <Separator />
+
+              {/* Section 4: Security & Data Privacy */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Security & Data Privacy</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <InfoRow icon={Database} label="Data Categories" value={formatArray(request.dataInput)} />
+                  {editing ? (
+                    <div className="flex items-start gap-2">
+                      <Shield className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-xs text-muted-foreground">Data Training</p>
+                        <Select value={editData.dataTraining || ""} onValueChange={v => setEditData(d => ({ ...d, dataTraining: v }))}>
+                          <SelectTrigger className="h-8 mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="yes">Yes</SelectItem>
+                            <SelectItem value="no">No</SelectItem>
+                            <SelectItem value="unsure">Unsure</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <InfoRow icon={Shield} label="Data Training" value={formatLabel(request.dataTraining)} />
+                  )}
+                  {editing ? (
+                    <EditField
+                      icon={Key}
+                      label="Login Method"
+                      value={editData.loginMethod || ""}
+                      onChange={v => setEditData(d => ({ ...d, loginMethod: v }))}
+                    />
+                  ) : (
+                    <InfoRow icon={Key} label="Login Method" value={request.loginMethod || "Not provided"} />
+                  )}
+                  <InfoRow icon={CheckCircle2} label="Vendor Packet Acknowledged" value={formatBool((request as any).vendorPacketAcknowledged)} />
+                  <InfoRow icon={Calendar} label="Submitted" value={formatDate(request.createdAt)} />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
