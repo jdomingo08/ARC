@@ -520,6 +520,7 @@ export class DatabaseStorage implements IStorage {
       { name: "Kirun Amiri", email: "kirun.amiri@entravision.com", department: "IT Governance", role: "reviewer", reviewerRole: "chair" },
       { name: "Josh Silva", email: "josh.silva@entravision.com", department: "Cyber Security", role: "reviewer", reviewerRole: "security" },
       { name: "Jorge Domingo", email: "jorge.domingo@entravision.com", department: "Technology", role: "admin", reviewerRole: "technical_financial" },
+      { name: "Jorge Domingo (Test Reviewer)", email: "jdomingo08@gmail.com", department: "Testing", role: "reviewer", reviewerRole: "security" },
     ];
 
     const createdUsers: User[] = [];
