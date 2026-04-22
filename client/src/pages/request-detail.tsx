@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { getFilteredQuestions } from "@shared/vendor-questions";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { ToolInsightsFeed } from "@/components/tool-insights-feed";
 import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment, WorkflowStep } from "@shared/schema";
 
 export default function RequestDetailPage() {
@@ -318,7 +319,7 @@ export default function RequestDetailPage() {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <Link href="/requests">
           <Button variant="ghost" size="sm" data-testid="button-back">
@@ -466,7 +467,13 @@ export default function RequestDetailPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-1 order-first">
+          <div className="border rounded-lg bg-card shadow-sm overflow-hidden lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)]">
+            <ToolInsightsFeed toolName={request.toolName} />
+          </div>
+        </div>
+
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
