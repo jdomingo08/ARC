@@ -93,7 +93,8 @@ export function SectionAttachments({ section, requestId, onEnsureRequestId, read
         <Button
           type="button"
           size="sm"
-          className="h-7 px-2 bg-red-600 hover:bg-red-700 text-white text-xs font-medium shrink-0"
+          variant="default"
+          className="h-7 px-2 text-xs font-medium shrink-0"
           data-testid={`button-section-docs-${section}`}
         >
           <Paperclip className="h-3 w-3 mr-1" /> {label}

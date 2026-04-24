@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { User, Target, DollarSign, ShieldCheck } from "lucide-react";
+import { User, Target, DollarSign, ShieldCheck, Mail } from "lucide-react";
 import type { Platform } from "@shared/schema";
 import { ToolInsightsFeed } from "@/components/tool-insights-feed";
 import { VendorQuestionnaire } from "@/components/vendor-questionnaire";
@@ -126,11 +126,31 @@ export function RequestFormSections({
                   </CardTitle>
                   <CardDescription>{sections[step].description}</CardDescription>
                 </div>
-                <SectionAttachments
-                  section={SECTION_KEYS[step]}
-                  requestId={existingRequestId}
-                  onEnsureRequestId={mode === "create" ? onSaveDraft : undefined}
-                />
+                <div className="flex items-center gap-2 shrink-0">
+                  {step === 3 && (
+                    <Button
+                      type="button"
+                      asChild
+                      size="sm"
+                      variant="default"
+                      className="h-7 px-2 text-xs font-medium"
+                      data-testid="button-email-security"
+                    >
+                      <a
+                        href="https://mail.google.com/mail/?view=cm&fs=1&to=infosec@entravision.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Mail className="h-3 w-3 mr-1" /> Email Security
+                      </a>
+                    </Button>
+                  )}
+                  <SectionAttachments
+                    section={SECTION_KEYS[step]}
+                    requestId={existingRequestId}
+                    onEnsureRequestId={mode === "create" ? onSaveDraft : undefined}
+                  />
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
