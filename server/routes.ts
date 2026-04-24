@@ -1578,6 +1578,43 @@ export async function registerRoutes(
     }
   });
 
+  // Admin-only: fully reset the vendor questionnaire so a new secure link can be issued,
+  // clearing any previously submitted vendor response and security review.
+  app.post("/api/requests/:id/admin-reset-vendor", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const token = `vq-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 10)}`;
+      const updated = await storage.updateRequest(request.id, {
+        vendorQuestionnaireToken: token,
+        vendorQuestionnaireCompleted: false,
+        vendorQuestionnaireData: null,
+        vendorSecurityReview: null,
+        vendorSecurityReviewerId: null,
+        vendorSecurityReviewedAt: null,
+      } as any);
+
+      await storage.createAuditLog({
+        entityType: "request",
+        entityId: request.id,
+        action: "vendor_link_reset",
+        before: {
+          vendorQuestionnaireCompleted: (request as any).vendorQuestionnaireCompleted,
+          hadVendorData: !!(request as any).vendorQuestionnaireData,
+          hadSecurityReview: !!(request as any).vendorSecurityReview,
+        },
+        after: { newToken: true },
+        actorId: user.id,
+      });
+
+      res.json({ token, request: updated });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
   // Public: Get vendor form info (no auth)
   app.get("/api/vendor-form/:token", async (req, res) => {
     try {
