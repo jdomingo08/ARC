@@ -769,6 +769,11 @@ export class DatabaseStorage implements IStorage {
       ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS routed_to_role TEXT;
     `).catch(() => { /* columns may already exist */ });
 
+    // Add per-section tagging on request attachments
+    await pool.query(`
+      ALTER TABLE request_attachments ADD COLUMN IF NOT EXISTS section TEXT;
+    `).catch(() => { /* column may already exist */ });
+
     // Create workflow_steps table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS workflow_steps (

@@ -109,6 +109,31 @@ export default function RequestDetailPage() {
     }
   };
 
+  const resetVendorMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/requests/${id}/admin-reset-vendor`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Vendor link reset", description: "A new secure link has been generated. The previous response and assessment have been cleared." });
+      setSecurityAssessments({});
+      queryClient.invalidateQueries({ queryKey: ["/api/requests", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/audit", "request", id] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Reset failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleResetVendor = () => {
+    const message = (request as any)?.vendorQuestionnaireCompleted
+      ? "This will invalidate the vendor's current submitted response AND clear the Security Assessment. A new secure link will be generated so the vendor can refile. Continue?"
+      : "Generate a new vendor link? The current link will stop working.";
+    if (window.confirm(message)) {
+      resetVendorMutation.mutate();
+    }
+  };
+
   const resubmitMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("PATCH", `/api/requests/${id}`, { status: "pending_reviews" });
@@ -683,20 +708,40 @@ export default function RequestDetailPage() {
             const existingReview = (request as any).vendorSecurityReview as Record<string, string> | null;
             const questions = getFilteredQuestions((request as any).division);
             const passCount = existingReview ? Object.values(existingReview).filter(v => v === "pass").length : 0;
-            const totalReviewed = existingReview ? Object.keys(existingReview).length : 0;
+            const failCount = existingReview ? Object.values(existingReview).filter(v => v === "fail").length : 0;
+            const naCount = existingReview ? Object.values(existingReview).filter(v => v === "na").length : 0;
+            const scoredTotal = passCount + failCount;
 
             return (
               <Card className="border-green-200 bg-green-50/30 dark:bg-green-950/10 dark:border-green-800">
                 <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-green-600" /> Vendor Security Responses
-                  </CardTitle>
-                  <CardDescription>
-                    Completed by the vendor via the secure questionnaire link
-                    {existingReview && (
-                      <span className="ml-2 font-medium text-green-700">— Security Assessment: {passCount}/{totalReviewed} passed</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <ShieldCheck className="h-5 w-5 text-green-600" /> Vendor Security Responses
+                      </CardTitle>
+                      <CardDescription>
+                        Completed by the vendor via the secure questionnaire link
+                        {existingReview && (
+                          <span className="ml-2 font-medium text-green-700">
+                            — Security Assessment: {passCount}/{scoredTotal} passed{naCount > 0 ? ` (${naCount} N/A)` : ""}
+                          </span>
+                        )}
+                      </CardDescription>
+                    </div>
+                    {isAdmin && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResetVendor}
+                        disabled={resetVendorMutation.isPending}
+                        data-testid="button-reset-vendor"
+                      >
+                        <Clock className="h-4 w-4 mr-1" />
+                        {resetVendorMutation.isPending ? "Resetting..." : "Reset & Resend Link"}
+                      </Button>
                     )}
-                  </CardDescription>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {questions.map((q, i) => {
@@ -707,12 +752,12 @@ export default function RequestDetailPage() {
                       <div key={q.id} className="border rounded-lg p-3 space-y-2 bg-white dark:bg-background">
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-sm font-semibold">{i + 1}. {q.title}</p>
-                          {/* Inline pass/fail — security reviewer and admin only */}
+                          {/* Inline pass/fail/na — security reviewer and admin only */}
                           {isSecurityReviewer && (
                             <div className="shrink-0">
                               {existingReview ? (
-                                <span className={`text-xs font-semibold px-2 py-1 rounded ${reviewValue === "pass" ? "bg-green-100 text-green-700" : reviewValue === "fail" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-500"}`}>
-                                  {reviewValue === "pass" ? "Pass" : reviewValue === "fail" ? "Fail" : "—"}
+                                <span className={`text-xs font-semibold px-2 py-1 rounded ${reviewValue === "pass" ? "bg-green-100 text-green-700" : reviewValue === "fail" ? "bg-red-100 text-red-700" : reviewValue === "na" ? "bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-500"}`}>
+                                  {reviewValue === "pass" ? "Pass" : reviewValue === "fail" ? "Fail" : reviewValue === "na" ? "N/A" : "—"}
                                 </span>
                               ) : (
                                 <RadioGroup
@@ -728,14 +773,18 @@ export default function RequestDetailPage() {
                                     <RadioGroupItem value="fail" id={`sa-fail-${q.id}`} />
                                     <label htmlFor={`sa-fail-${q.id}`} className="text-xs text-red-700 font-medium cursor-pointer">Fail</label>
                                   </div>
+                                  <div className="flex items-center gap-1">
+                                    <RadioGroupItem value="na" id={`sa-na-${q.id}`} />
+                                    <label htmlFor={`sa-na-${q.id}`} className="text-xs text-gray-600 font-medium cursor-pointer">N/A</label>
+                                  </div>
                                 </RadioGroup>
                               )}
                             </div>
                           )}
                           {/* Show submitted badge for non-security users */}
                           {!isSecurityReviewer && existingReview && reviewValue && (
-                            <span className={`text-xs font-semibold px-2 py-1 rounded shrink-0 ${reviewValue === "pass" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                              {reviewValue === "pass" ? "Pass" : "Fail"}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded shrink-0 ${reviewValue === "pass" ? "bg-green-100 text-green-700" : reviewValue === "fail" ? "bg-red-100 text-red-700" : "bg-gray-200 text-gray-700"}`}>
+                              {reviewValue === "pass" ? "Pass" : reviewValue === "fail" ? "Fail" : "N/A"}
                             </span>
                           )}
                         </div>
@@ -767,12 +816,25 @@ export default function RequestDetailPage() {
           {(request as any).vendorQuestionnaireToken && !(request as any).vendorQuestionnaireCompleted && (
             <Card className="border-amber-200 bg-amber-50/30 dark:bg-amber-950/10 dark:border-amber-800">
               <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <Clock className="h-5 w-5 text-amber-600" />
-                  <div>
-                    <p className="text-sm font-medium">Vendor Security Questionnaire Pending</p>
-                    <p className="text-xs text-muted-foreground">A questionnaire link has been sent to the vendor. Responses will appear here once submitted.</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Clock className="h-5 w-5 text-amber-600 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Vendor Security Questionnaire Pending</p>
+                      <p className="text-xs text-muted-foreground">A questionnaire link has been sent to the vendor. Responses will appear here once submitted.</p>
+                    </div>
                   </div>
+                  {isAdmin && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResetVendor}
+                      disabled={resetVendorMutation.isPending}
+                      data-testid="button-reset-vendor-pending"
+                    >
+                      {resetVendorMutation.isPending ? "Resetting..." : "Regenerate Link"}
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
