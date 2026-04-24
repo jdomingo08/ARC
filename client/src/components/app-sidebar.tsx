@@ -26,6 +26,7 @@ import {
   LogOut,
   Shield,
   Bot,
+  Mail,
 } from "lucide-react";
 
 export function AppSidebar() {
@@ -109,6 +110,19 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
       </SidebarContent>
+
+      <div className="px-3 pb-3">
+        <a
+          href="https://mail.google.com/mail/?view=cm&fs=1&to=arc@entravision.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium shadow-sm"
+          data-testid="link-contact-committee"
+        >
+          <Mail className="h-4 w-4" />
+          <span>Contact the Committee</span>
+        </a>
+      </div>
 
       {user && (
         <SidebarFooter className="p-4">
