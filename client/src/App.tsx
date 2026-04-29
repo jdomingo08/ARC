@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Loader2 } from "lucide-react";
 
 import LoginPage from "@/pages/login";
@@ -61,19 +62,21 @@ function AppContent() {
             <SidebarTrigger data-testid="button-sidebar-toggle" />
           </header>
           <main className="flex-1 overflow-auto">
-            <Switch>
-              <Route path="/" component={DashboardPage} />
-              <Route path="/requests/new" component={NewRequestPage} />
-              <Route path="/requests/:id" component={RequestDetailPage} />
-              <Route path="/requests" component={MyRequestsPage} />
-              <Route path="/reviews" component={ReviewerInboxPage} />
-              <Route path="/platforms/:id" component={PlatformDetailPage} />
-              <Route path="/platforms" component={PlatformListPage} />
-              <Route path="/admin" component={AdminPage} />
-              <Route path="/risk" component={RiskAgentPage} />
-              <Route path="/agents" component={AgentModulesPage} />
-              <Route component={NotFound} />
-            </Switch>
+            <ErrorBoundary>
+              <Switch>
+                <Route path="/" component={DashboardPage} />
+                <Route path="/requests/new" component={NewRequestPage} />
+                <Route path="/requests/:id" component={RequestDetailPage} />
+                <Route path="/requests" component={MyRequestsPage} />
+                <Route path="/reviews" component={ReviewerInboxPage} />
+                <Route path="/platforms/:id" component={PlatformDetailPage} />
+                <Route path="/platforms" component={PlatformListPage} />
+                <Route path="/admin" component={AdminPage} />
+                <Route path="/risk" component={RiskAgentPage} />
+                <Route path="/agents" component={AgentModulesPage} />
+                <Route component={NotFound} />
+              </Switch>
+            </ErrorBoundary>
           </main>
         </div>
       </div>

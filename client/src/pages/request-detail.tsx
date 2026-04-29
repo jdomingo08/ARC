@@ -231,8 +231,11 @@ export default function RequestDetailPage() {
   const formatDate = (date: string | Date) =>
     new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
-  const formatArray = (arr: string[] | null) =>
-    arr?.map(s => s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())).join(", ") || "N/A";
+  const formatArray = (arr: string[] | string | null | undefined) => {
+    if (!arr) return "N/A";
+    const list = Array.isArray(arr) ? arr : [arr];
+    return list.map(s => String(s).replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())).join(", ") || "N/A";
+  };
 
   const formatLabel = (s: string | null | undefined, fallback = "Not provided") =>
     s ? s.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) : fallback;
