@@ -3,8 +3,6 @@ import { createServer, type Server } from "http";
 import session from "express-session";
 import passport from "passport";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
 import { storage } from "./storage";
 import { configurePassport } from "./auth";
 import { createLLMProvider } from "./ai/provider";
@@ -13,15 +11,18 @@ import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
 import type { User, PlatformAttributeDefinition } from "@shared/schema";
 import { adminEditRequestSchema, requestAttachmentSectionEnum } from "@shared/schema";
-
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+import {
+  buildPlatformKey,
+  buildRequestKey,
+  deleteObject,
+  getObjectStream,
+  isLegacyDiskPath,
+  objectExists,
+  putObject,
+} from "./object-storage";
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadDir),
-    filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
@@ -1078,17 +1079,25 @@ export async function registerRoutes(
       const sectionParsed = requestAttachmentSectionEnum.safeParse(req.body.section);
       const section = sectionParsed.success ? sectionParsed.data : null;
 
-      const attachment = await storage.createRequestAttachment({
-        requestId: req.params.id,
-        uploadedBy: user.id,
-        uploaderName: user.name,
-        fileName: file.originalname,
-        fileSize: file.size,
-        mimeType: file.mimetype || null,
-        storagePath: file.path,
-        section,
-      });
-      res.json(attachment);
+      const key = buildRequestKey(req.params.id, file.originalname);
+      await putObject(key, file.buffer);
+
+      try {
+        const attachment = await storage.createRequestAttachment({
+          requestId: req.params.id,
+          uploadedBy: user.id,
+          uploaderName: user.name,
+          fileName: file.originalname,
+          fileSize: file.size,
+          mimeType: file.mimetype || null,
+          storagePath: key,
+          section,
+        });
+        res.json(attachment);
+      } catch (dbErr) {
+        await deleteObject(key).catch(() => {});
+        throw dbErr;
+      }
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1099,11 +1108,27 @@ export async function registerRoutes(
       const attachment = await storage.getAttachment(req.params.id);
       if (!attachment) return res.status(404).json({ message: "Attachment not found" });
 
-      if (!fs.existsSync(attachment.storagePath)) {
-        return res.status(404).json({ message: "File not found on disk" });
+      if (isLegacyDiskPath(attachment.storagePath)) {
+        return res.status(410).json({
+          message: "This file was uploaded before persistent storage was enabled and is no longer available. Please ask the uploader to re-upload it.",
+        });
       }
 
-      res.download(attachment.storagePath, attachment.fileName);
+      if (!(await objectExists(attachment.storagePath))) {
+        return res.status(404).json({ message: "File not found in storage" });
+      }
+
+      res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${attachment.fileName.replace(/"/g, "")}"`,
+      );
+      const stream = getObjectStream(attachment.storagePath);
+      stream.on("error", (err) => {
+        if (!res.headersSent) res.status(500).json({ message: err.message });
+        else res.destroy(err);
+      });
+      stream.pipe(res);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1119,9 +1144,8 @@ export async function registerRoutes(
         return res.status(403).json({ message: "You can only delete your own uploads" });
       }
 
-      // Remove file from disk
-      if (fs.existsSync(attachment.storagePath)) {
-        fs.unlinkSync(attachment.storagePath);
+      if (!isLegacyDiskPath(attachment.storagePath)) {
+        await deleteObject(attachment.storagePath).catch(() => { /* tolerate already-gone */ });
       }
 
       await storage.deleteRequestAttachment(req.params.id);
@@ -1313,16 +1337,24 @@ export async function registerRoutes(
       const file = req.file;
       if (!file) return res.status(400).json({ message: "No file uploaded" });
 
-      const attachment = await storage.createPlatformAttachment({
-        platformId: req.params.id,
-        uploadedBy: user.id,
-        uploaderName: user.name,
-        fileName: file.originalname,
-        fileSize: file.size,
-        mimeType: file.mimetype || null,
-        storagePath: file.path,
-      });
-      res.json(attachment);
+      const key = buildPlatformKey(req.params.id, file.originalname);
+      await putObject(key, file.buffer);
+
+      try {
+        const attachment = await storage.createPlatformAttachment({
+          platformId: req.params.id,
+          uploadedBy: user.id,
+          uploaderName: user.name,
+          fileName: file.originalname,
+          fileSize: file.size,
+          mimeType: file.mimetype || null,
+          storagePath: key,
+        });
+        res.json(attachment);
+      } catch (dbErr) {
+        await deleteObject(key).catch(() => {});
+        throw dbErr;
+      }
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1333,11 +1365,27 @@ export async function registerRoutes(
       const attachment = await storage.getPlatformAttachment(req.params.id);
       if (!attachment) return res.status(404).json({ message: "Attachment not found" });
 
-      if (!fs.existsSync(attachment.storagePath)) {
-        return res.status(404).json({ message: "File not found on disk" });
+      if (isLegacyDiskPath(attachment.storagePath)) {
+        return res.status(410).json({
+          message: "This file was uploaded before persistent storage was enabled and is no longer available. Please ask the uploader to re-upload it.",
+        });
       }
 
-      res.download(attachment.storagePath, attachment.fileName);
+      if (!(await objectExists(attachment.storagePath))) {
+        return res.status(404).json({ message: "File not found in storage" });
+      }
+
+      res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${attachment.fileName.replace(/"/g, "")}"`,
+      );
+      const stream = getObjectStream(attachment.storagePath);
+      stream.on("error", (err) => {
+        if (!res.headersSent) res.status(500).json({ message: err.message });
+        else res.destroy(err);
+      });
+      stream.pipe(res);
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1353,8 +1401,8 @@ export async function registerRoutes(
         return res.status(403).json({ message: "You can only delete your own uploads" });
       }
 
-      if (fs.existsSync(attachment.storagePath)) {
-        fs.unlinkSync(attachment.storagePath);
+      if (!isLegacyDiskPath(attachment.storagePath)) {
+        await deleteObject(attachment.storagePath).catch(() => { /* tolerate already-gone */ });
       }
 
       await storage.deletePlatformAttachment(req.params.id);
