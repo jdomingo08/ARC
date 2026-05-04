@@ -122,13 +122,22 @@ export async function registerRoutes(
   // Google SSO routes (only active when credentials are configured)
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     const hasExtraAllowedEmails = !!(process.env.GOOGLE_ALLOWED_EXTRA_EMAILS || "").trim();
+    const allowedDomains = (process.env.GOOGLE_ALLOWED_DOMAIN || "")
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean);
+    // Google's `hd` hint only accepts a single domain; drop it when extras are
+    // configured or when multiple domains are allowed, and let server-side verify
+    // enforce access instead.
+    const hdHint =
+      !hasExtraAllowedEmails && allowedDomains.length === 1
+        ? { hd: allowedDomains[0] }
+        : {};
     app.get(
       "/api/auth/google",
       passport.authenticate("google", {
         scope: ["email", "profile"],
-        // When extras are configured we need personal accounts in the picker,
-        // so drop the hd hint and let server-side verify enforce access.
-        ...(hasExtraAllowedEmails ? {} : { hd: process.env.GOOGLE_ALLOWED_DOMAIN }),
+        ...hdHint,
       } as any)
     );
 

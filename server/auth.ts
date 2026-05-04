@@ -41,9 +41,16 @@ export function configurePassport() {
               .filter(Boolean);
             const isExtraAllowed = extraAllowedEmails.includes(email.toLowerCase());
 
-            // Domain restriction (defense in depth — also set at GCP level)
-            const allowedDomain = process.env.GOOGLE_ALLOWED_DOMAIN;
-            if (allowedDomain && !email.endsWith(`@${allowedDomain}`) && !isExtraAllowed) {
+            // Domain restriction (defense in depth — also set at GCP level).
+            // Supports a comma-separated list so multiple Workspace domains can sign in.
+            const allowedDomains = (process.env.GOOGLE_ALLOWED_DOMAIN || "")
+              .split(",")
+              .map((d) => d.trim().toLowerCase())
+              .filter(Boolean);
+            const matchesAllowedDomain = allowedDomains.some((d) =>
+              email.toLowerCase().endsWith(`@${d}`)
+            );
+            if (allowedDomains.length > 0 && !matchesAllowedDomain && !isExtraAllowed) {
               return done(null, false, { message: "Email domain not allowed" });
             }
 
@@ -58,7 +65,7 @@ export function configurePassport() {
             const isAdmin = adminEmails.includes(email.toLowerCase());
 
             // Auto-provision new users with allowed domain or on the extras list
-            if (!user && (isExtraAllowed || (allowedDomain && email.endsWith(`@${allowedDomain}`)))) {
+            if (!user && (isExtraAllowed || matchesAllowedDomain)) {
               const displayName = profile.displayName || email.split("@")[0];
               const adminReviewerRole = process.env.ADMIN_REVIEWER_ROLE || "technical_financial";
               user = await storage.createUser({

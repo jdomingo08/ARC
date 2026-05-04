@@ -54,7 +54,7 @@ Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 r
 ## Auth Env Vars
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — enables Google SSO
 - `GOOGLE_CALLBACK_URL` — override the OAuth callback (defaults to `/api/auth/google/callback`)
-- `GOOGLE_ALLOWED_DOMAIN` — restricts SSO to one Workspace domain (e.g. `entravision.com`)
+- `GOOGLE_ALLOWED_DOMAIN` — restricts SSO to one or more Workspace domains. Comma-separated for multiple (e.g. `entravision.com,smadex.com,adwake.ai`). When more than one domain is configured, the `hd` account-picker hint is dropped and the server-side verify enforces access.
 - `GOOGLE_ALLOWED_EXTRA_EMAILS` — comma-separated emails that bypass `GOOGLE_ALLOWED_DOMAIN`. When set, the `hd` account-picker hint is dropped so personal Gmail accounts can appear. Server-side verify still rejects anything not on the domain or this list.
 - `ADMIN_EMAILS` — comma-separated emails auto-promoted to admin on first SSO login
 - `ADMIN_REVIEWER_ROLE` — reviewerRole assigned when auto-promoting admins (default `technical_financial`)

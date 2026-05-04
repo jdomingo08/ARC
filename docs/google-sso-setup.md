@@ -86,7 +86,7 @@ The app is deployed on Replit. Environment variables are set via **Replit Secret
 | `GOOGLE_CLIENT_ID` | `123456789-abcdef.apps.googleusercontent.com` | Yes (for SSO) | From GCP Step 3 above |
 | `GOOGLE_CLIENT_SECRET` | `GOCSPX-...` | Yes (for SSO) | From GCP Step 3 above — treat as a password |
 | `GOOGLE_CALLBACK_URL` | `https://[your-app-url]/api/auth/google/callback` | Recommended | Full URL including protocol. If omitted, defaults to relative path which works but explicit is safer |
-| `GOOGLE_ALLOWED_DOMAIN` | `entravision.com` | Recommended | Defense-in-depth domain check in code. Even if GCP consent screen is set to Internal, this adds a second layer |
+| `GOOGLE_ALLOWED_DOMAIN` | `entravision.com,smadex.com,adwake.ai` | Recommended | Defense-in-depth domain check in code. Comma-separated for multiple domains. Even if GCP consent screen is set to Internal, this adds a second layer |
 | `SESSION_SECRET` | `a-long-random-string-at-least-32-chars` | Yes (for production) | Currently defaults to a dev value which is insecure for production |
 
 ### Variables already set (no changes needed)
@@ -100,7 +100,7 @@ The app is deployed on Replit. Environment variables are set via **Replit Secret
 
 - **If `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are both set:** Google SSO is enabled. The login page shows a "Sign in with Google" button.
 - **If either is missing:** Google SSO is silently disabled. The app works as before (email-click only in dev). This means you can safely deploy without Google credentials and add them later.
-- **`GOOGLE_ALLOWED_DOMAIN`:** Checked after Google returns the user's email. If the domain doesn't match, login is rejected.
+- **`GOOGLE_ALLOWED_DOMAIN`:** Checked after Google returns the user's email. Accepts a single domain or a comma-separated list (e.g. `entravision.com,smadex.com,adwake.ai`). If the email's domain matches none of them, login is rejected. When more than one domain is configured, the Google `hd` account-picker hint is dropped so users from any allowed domain can pick the right account.
 - **`NODE_ENV`:** In production, the email-click dev login is hidden. Only the Google button appears.
 
 ### Generating a strong SESSION_SECRET
@@ -142,7 +142,7 @@ Current seed users have `@arc.io` emails. For production, user emails must match
 - [ ] `GOOGLE_CLIENT_ID` set in Replit Secrets
 - [ ] `GOOGLE_CLIENT_SECRET` set in Replit Secrets
 - [ ] `GOOGLE_CALLBACK_URL` set in Replit Secrets
-- [ ] `GOOGLE_ALLOWED_DOMAIN` set to `entravision.com`
+- [ ] `GOOGLE_ALLOWED_DOMAIN` set to the allowed domain(s), e.g. `entravision.com,smadex.com,adwake.ai`
 - [ ] `SESSION_SECRET` set to a strong random value
 - [ ] User emails in database updated to match real `@entravision.com` addresses
 - [ ] Tested sign-in flow end-to-end
