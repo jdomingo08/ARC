@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -346,3 +346,93 @@ export type PlatformAttachment = typeof platformAttachments.$inferSelect;
 export type InsertPlatformAttachment = z.infer<typeof insertPlatformAttachmentSchema>;
 export type WorkflowStep = typeof workflowSteps.$inferSelect;
 export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Command Center
+//
+// Central monitoring hub for the third-party APIs the organization consumes.
+// OpenAI is the first integration; tables are keyed by `provider` so additional
+// providers (Anthropic, Google, etc.) can be added without schema changes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const apiProviderEnum = z.enum(["openai"]);
+export type ApiProvider = z.infer<typeof apiProviderEnum>;
+
+// One row per provider per UTC day — a snapshot of that day's usage and spend.
+export const apiUsageSnapshots = pgTable("api_usage_snapshots", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull().default("openai"),
+  usageDate: text("usage_date").notNull(), // YYYY-MM-DD (UTC)
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+  numRequests: integer("num_requests").notNull().default(0),
+  costUsd: decimal("cost_usd", { precision: 12, scale: 4 }).notNull().default("0"),
+  currency: text("currency").notNull().default("usd"),
+  byModel: jsonb("by_model").default([]),       // [{ model, inputTokens, outputTokens, numRequests }]
+  byLineItem: jsonb("by_line_item").default([]), // [{ name, costUsd }]
+  byProject: jsonb("by_project").default([]),    // [{ projectId, costUsd }]
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  providerDateUnique: unique("api_usage_snapshots_provider_date_unique").on(t.provider, t.usageDate),
+}));
+
+// Cron config for the automatic daily usage sync (and optional Slack digest).
+export const apiUsageSchedules = pgTable("api_usage_schedules", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull().default("openai"),
+  cronExpression: text("cron_expression").notNull().default("0 6 * * *"),
+  enabled: boolean("enabled").notNull().default(true),
+  lookbackDays: integer("lookback_days").notNull().default(3),
+  slackDigestEnabled: boolean("slack_digest_enabled").notNull().default(true),
+  lastRunAt: timestamp("last_run_at"),
+  lastRunStatus: text("last_run_status"),
+  lastRunError: text("last_run_error"),
+  createdBy: varchar("created_by", { length: 36 }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Audit trail of each sync run (manual or scheduled).
+export const apiSyncLogs = pgTable("api_sync_logs", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull().default("openai"),
+  trigger: text("trigger").notNull().default("manual"), // manual | scheduled
+  status: text("status").notNull().default("completed"), // running | completed | failed
+  daysFetched: integer("days_fetched").notNull().default(0),
+  rangeStart: text("range_start"),
+  rangeEnd: text("range_end"),
+  summary: text("summary"),
+  error: text("error"),
+  slackDigestSent: boolean("slack_digest_sent").notNull().default(false),
+  initiatedBy: varchar("initiated_by", { length: 36 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertApiUsageSnapshotSchema = createInsertSchema(apiUsageSnapshots).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertApiUsageScheduleSchema = createInsertSchema(apiUsageSchedules).omit({ id: true, updatedAt: true });
+export const insertApiSyncLogSchema = createInsertSchema(apiSyncLogs).omit({ id: true, createdAt: true });
+
+export type ApiUsageSnapshot = typeof apiUsageSnapshots.$inferSelect;
+export type InsertApiUsageSnapshot = z.infer<typeof insertApiUsageSnapshotSchema>;
+export type ApiUsageSchedule = typeof apiUsageSchedules.$inferSelect;
+export type InsertApiUsageSchedule = z.infer<typeof insertApiUsageScheduleSchema>;
+export type ApiSyncLog = typeof apiSyncLogs.$inferSelect;
+export type InsertApiSyncLog = z.infer<typeof insertApiSyncLogSchema>;
+
+// Normalized per-day usage payload returned by provider clients before persistence.
+export interface NormalizedDailyUsage {
+  usageDate: string; // YYYY-MM-DD (UTC)
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  totalTokens: number;
+  numRequests: number;
+  costUsd: number;
+  currency: string;
+  byModel: Array<{ model: string; inputTokens: number; outputTokens: number; numRequests: number }>;
+  byLineItem: Array<{ name: string; costUsd: number }>;
+  byProject: Array<{ projectId: string; costUsd: number }>;
+}

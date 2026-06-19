@@ -1,11 +1,12 @@
 import { db } from "./db";
 import { pool } from "./db";
-import { eq, desc, and, ilike, sql } from "drizzle-orm";
+import { eq, desc, and, ilike, sql, gte, lte, asc } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
   agentRunLogs, auditLogs, scanSchedules, alertSchedules, requestComments, requestAttachments,
   platformStakeholders, expirationAlerts, platformAttachments,
+  apiUsageSnapshots, apiUsageSchedules, apiSyncLogs,
   type User, type InsertUser,
   type Request, type InsertRequest,
   type ReviewDecision, type InsertReviewDecision,
@@ -24,6 +25,9 @@ import {
   type PlatformAttachment, type InsertPlatformAttachment,
   workflowSteps,
   type WorkflowStep, type InsertWorkflowStep,
+  type ApiUsageSnapshot, type InsertApiUsageSnapshot,
+  type ApiUsageSchedule, type InsertApiUsageSchedule,
+  type ApiSyncLog, type InsertApiSyncLog,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -114,6 +118,16 @@ export interface IStorage {
   createWorkflowStep(step: InsertWorkflowStep): Promise<WorkflowStep>;
   updateWorkflowStep(id: string, data: Partial<WorkflowStep>): Promise<WorkflowStep | undefined>;
   deleteWorkflowStep(id: string): Promise<boolean>;
+
+  // API Command Center — usage snapshots, schedule, sync logs
+  upsertUsageSnapshot(data: Partial<InsertApiUsageSnapshot> & { provider: string; usageDate: string }): Promise<ApiUsageSnapshot>;
+  getUsageSnapshots(provider: string, opts?: { startDate?: string; endDate?: string; limit?: number }): Promise<ApiUsageSnapshot[]>;
+  getLatestUsageSnapshot(provider: string): Promise<ApiUsageSnapshot | undefined>;
+  getUsageSchedule(): Promise<ApiUsageSchedule | undefined>;
+  upsertUsageSchedule(data: Partial<InsertApiUsageSchedule> & { id?: string }): Promise<ApiUsageSchedule>;
+  createApiSyncLog(log: InsertApiSyncLog): Promise<ApiSyncLog>;
+  updateApiSyncLog(id: string, data: Partial<ApiSyncLog>): Promise<void>;
+  getApiSyncLogs(provider?: string, limit?: number): Promise<ApiSyncLog[]>;
 
   seedData(): Promise<void>;
   runStartupMigrations(): Promise<void>;
@@ -724,6 +738,106 @@ export class DatabaseStorage implements IStorage {
     ]);
   }
 
+  // ── API Command Center ─────────────────────────────────────────────────────
+
+  async upsertUsageSnapshot(
+    data: Partial<InsertApiUsageSnapshot> & { provider: string; usageDate: string },
+  ): Promise<ApiUsageSnapshot> {
+    const [existing] = await db
+      .select()
+      .from(apiUsageSnapshots)
+      .where(and(eq(apiUsageSnapshots.provider, data.provider), eq(apiUsageSnapshots.usageDate, data.usageDate)))
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await db
+        .update(apiUsageSnapshots)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(apiUsageSnapshots.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(apiUsageSnapshots).values(data as InsertApiUsageSnapshot).returning();
+    return created;
+  }
+
+  async getUsageSnapshots(
+    provider: string,
+    opts?: { startDate?: string; endDate?: string; limit?: number },
+  ): Promise<ApiUsageSnapshot[]> {
+    const conditions = [eq(apiUsageSnapshots.provider, provider)];
+    if (opts?.startDate) conditions.push(gte(apiUsageSnapshots.usageDate, opts.startDate));
+    if (opts?.endDate) conditions.push(lte(apiUsageSnapshots.usageDate, opts.endDate));
+
+    const query = db
+      .select()
+      .from(apiUsageSnapshots)
+      .where(and(...conditions))
+      .orderBy(asc(apiUsageSnapshots.usageDate));
+
+    if (opts?.limit) return query.limit(opts.limit);
+    return query;
+  }
+
+  async getLatestUsageSnapshot(provider: string): Promise<ApiUsageSnapshot | undefined> {
+    const [latest] = await db
+      .select()
+      .from(apiUsageSnapshots)
+      .where(eq(apiUsageSnapshots.provider, provider))
+      .orderBy(desc(apiUsageSnapshots.usageDate))
+      .limit(1);
+    return latest;
+  }
+
+  async getUsageSchedule(): Promise<ApiUsageSchedule | undefined> {
+    const [schedule] = await db.select().from(apiUsageSchedules).limit(1);
+    return schedule;
+  }
+
+  async upsertUsageSchedule(
+    data: Partial<InsertApiUsageSchedule> & { id?: string },
+  ): Promise<ApiUsageSchedule> {
+    const existing = await this.getUsageSchedule();
+    if (existing) {
+      const [updated] = await db
+        .update(apiUsageSchedules)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(apiUsageSchedules.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db
+      .insert(apiUsageSchedules)
+      .values({
+        provider: data.provider || "openai",
+        cronExpression: data.cronExpression || "0 6 * * *",
+        enabled: data.enabled ?? true,
+        lookbackDays: data.lookbackDays ?? 3,
+        slackDigestEnabled: data.slackDigestEnabled ?? true,
+        createdBy: data.createdBy,
+      })
+      .returning();
+    return created;
+  }
+
+  async createApiSyncLog(log: InsertApiSyncLog): Promise<ApiSyncLog> {
+    const [created] = await db.insert(apiSyncLogs).values(log).returning();
+    return created;
+  }
+
+  async updateApiSyncLog(id: string, data: Partial<ApiSyncLog>): Promise<void> {
+    await db.update(apiSyncLogs).set(data).where(eq(apiSyncLogs.id, id));
+  }
+
+  async getApiSyncLogs(provider?: string, limit = 25): Promise<ApiSyncLog[]> {
+    const query = db.select().from(apiSyncLogs);
+    if (provider) {
+      return query.where(eq(apiSyncLogs.provider, provider)).orderBy(desc(apiSyncLogs.createdAt)).limit(limit);
+    }
+    return query.orderBy(desc(apiSyncLogs.createdAt)).limit(limit);
+  }
+
   async runStartupMigrations(): Promise<void> {
     // Allow nullable fields for draft requests
     await pool.query(`
@@ -805,6 +919,56 @@ export class DatabaseStorage implements IStorage {
                 ELSE '{}'::jsonb END
       WHERE dynamic_attributes ? 'Contract Expiry' OR dynamic_attributes ? 'Contract Expiration'
     `);
+
+    // API Command Center tables (created here so the module works without db:push)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS api_usage_snapshots (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        provider TEXT NOT NULL DEFAULT 'openai',
+        usage_date TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        num_requests INTEGER NOT NULL DEFAULT 0,
+        cost_usd NUMERIC(12, 4) NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'usd',
+        by_model JSONB DEFAULT '[]'::jsonb,
+        by_line_item JSONB DEFAULT '[]'::jsonb,
+        by_project JSONB DEFAULT '[]'::jsonb,
+        fetched_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        CONSTRAINT api_usage_snapshots_provider_date_unique UNIQUE (provider, usage_date)
+      );
+      CREATE TABLE IF NOT EXISTS api_usage_schedules (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        provider TEXT NOT NULL DEFAULT 'openai',
+        cron_expression TEXT NOT NULL DEFAULT '0 6 * * *',
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        lookback_days INTEGER NOT NULL DEFAULT 3,
+        slack_digest_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        last_run_at TIMESTAMP,
+        last_run_status TEXT,
+        last_run_error TEXT,
+        created_by VARCHAR(36),
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS api_sync_logs (
+        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+        provider TEXT NOT NULL DEFAULT 'openai',
+        trigger TEXT NOT NULL DEFAULT 'manual',
+        status TEXT NOT NULL DEFAULT 'completed',
+        days_fetched INTEGER NOT NULL DEFAULT 0,
+        range_start TEXT,
+        range_end TEXT,
+        summary TEXT,
+        error TEXT,
+        slack_digest_sent BOOLEAN NOT NULL DEFAULT FALSE,
+        initiated_by VARCHAR(36),
+        created_at TIMESTAMP DEFAULT NOW() NOT NULL
+      );
+    `).catch(() => { /* tables may already exist */ });
   }
 }
 

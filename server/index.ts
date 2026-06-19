@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { execSync } from "child_process";
 import { RiskScheduler } from "./risk-agent/scheduler";
 import { AlertScheduler } from "./alert-scheduler";
+import { UsageScheduler } from "./integrations/usage-scheduler";
 import { storage } from "./storage";
 import { reviewerRoleEnum } from "@shared/schema";
 
@@ -93,6 +94,11 @@ app.use((req, res, next) => {
   const alertScheduler = new AlertScheduler(storage);
   await alertScheduler.initialize();
   (globalThis as any).__alertScheduler = alertScheduler;
+
+  // Initialize API Command Center usage scheduler
+  const usageScheduler = new UsageScheduler(storage);
+  await usageScheduler.initialize();
+  (globalThis as any).__usageScheduler = usageScheduler;
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

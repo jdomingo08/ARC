@@ -7,6 +7,9 @@ import { storage } from "./storage";
 import { configurePassport } from "./auth";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
+import { OpenAIUsageClient } from "./integrations/openai-usage";
+import { runOpenAiSync } from "./integrations/usage-service";
+import { isSlackConfigured } from "./integrations/slack-notifier";
 import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
 import type { User, PlatformAttributeDefinition } from "@shared/schema";
@@ -1000,6 +1003,176 @@ export async function registerRoutes(
       // Notify scheduler to reload (handled via export)
       if ((globalThis as any).__riskScheduler) {
         (globalThis as any).__riskScheduler.reload(schedule);
+      }
+
+      res.json(schedule);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // API Command Center — OpenAI usage & spend monitoring
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const OPENAI = "openai";
+  const utcDay = (offsetDays = 0) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + offsetDays);
+    return d.toISOString().slice(0, 10);
+  };
+
+  // Configuration / readiness status for the dashboard banner.
+  app.get("/api/integrations/openai/status", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+    try {
+      const client = new OpenAIUsageClient();
+      const latest = await storage.getLatestUsageSnapshot(OPENAI);
+      res.json({
+        provider: OPENAI,
+        adminKeyConfigured: client.isConfigured(),
+        slackConfigured: isSlackConfigured(),
+        latestSnapshotDate: latest?.usageDate ?? null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Aggregated dashboard payload: daily series + rolled-up totals over a window.
+  app.get("/api/integrations/openai/summary", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
+    try {
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? "30"), 10) || 30, 1), 180);
+      const start = new Date();
+      start.setUTCDate(start.getUTCDate() - (days - 1));
+      const startKey = start.toISOString().slice(0, 10);
+      const snapshots = await storage.getUsageSnapshots(OPENAI, { startDate: startKey });
+
+      const today = utcDay();
+      const completed = snapshots.filter((s) => s.usageDate < today);
+
+      const totals = snapshots.reduce(
+        (acc, s) => {
+          acc.costUsd += Number(s.costUsd);
+          acc.inputTokens += s.inputTokens;
+          acc.outputTokens += s.outputTokens;
+          acc.totalTokens += s.totalTokens;
+          acc.numRequests += s.numRequests;
+          return acc;
+        },
+        { costUsd: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, numRequests: 0 },
+      );
+      totals.costUsd = Math.round(totals.costUsd * 100) / 100;
+
+      // Aggregate token usage by model across the window.
+      const modelMap = new Map<string, { model: string; inputTokens: number; outputTokens: number; numRequests: number }>();
+      for (const s of snapshots) {
+        for (const m of (s.byModel as any[] | null) || []) {
+          const cur = modelMap.get(m.model) || { model: m.model, inputTokens: 0, outputTokens: 0, numRequests: 0 };
+          cur.inputTokens += Number(m.inputTokens || 0);
+          cur.outputTokens += Number(m.outputTokens || 0);
+          cur.numRequests += Number(m.numRequests || 0);
+          modelMap.set(m.model, cur);
+        }
+      }
+      const byModel = Array.from(modelMap.values()).sort(
+        (a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens),
+      );
+
+      res.json({
+        provider: OPENAI,
+        windowDays: days,
+        snapshots,
+        totals,
+        byModel,
+        yesterday: completed[completed.length - 1] ?? null,
+        today: snapshots.find((s) => s.usageDate === today) ?? null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Manual sync (admin) — backfills/refreshes the last N days from OpenAI.
+  app.post("/api/integrations/openai/sync", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const client = new OpenAIUsageClient();
+      if (!client.isConfigured()) {
+        return res.status(503).json({
+          message: "OpenAI Admin key not configured. Set OPENAI_ADMIN_KEY (an Organization Admin key, sk-admin-…) to enable usage syncing.",
+        });
+      }
+
+      const recentLogs = await storage.getApiSyncLogs(OPENAI, 5);
+      if (recentLogs.some((l) => l.status === "running")) {
+        return res.status(409).json({ message: "A usage sync is already in progress. Please wait for it to finish." });
+      }
+
+      const user = (req as any).user as User;
+      const days = Math.min(Math.max(parseInt(String(req.body?.days ?? "30"), 10) || 30, 1), 180);
+      const endDate = new Date();
+      endDate.setUTCDate(endDate.getUTCDate() + 1); // exclusive end → include today (partial)
+      const startDate = new Date();
+      startDate.setUTCDate(startDate.getUTCDate() - days);
+
+      const result = await runOpenAiSync(storage, {
+        startDate,
+        endDate,
+        trigger: "manual",
+        initiatedBy: user.id,
+        sendSlackDigest: false,
+      });
+
+      res.json({
+        summary: result.summary,
+        daysFetched: result.daysFetched,
+        costUsd: result.costUsd,
+        totalTokens: result.totalTokens,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/integrations/openai/logs", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+    try {
+      res.json(await storage.getApiSyncLogs(OPENAI, 25));
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/integrations/usage-schedule", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+    try {
+      const schedule = await storage.getUsageSchedule();
+      res.json(
+        schedule || {
+          enabled: true,
+          cronExpression: "0 6 * * *",
+          lookbackDays: 3,
+          slackDigestEnabled: true,
+          provider: OPENAI,
+        },
+      );
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.put("/api/integrations/usage-schedule", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const { enabled, cronExpression, lookbackDays, slackDigestEnabled } = req.body;
+      const schedule = await storage.upsertUsageSchedule({
+        enabled,
+        cronExpression,
+        lookbackDays,
+        slackDigestEnabled,
+        provider: OPENAI,
+        createdBy: user.id,
+      });
+
+      if ((globalThis as any).__usageScheduler) {
+        (globalThis as any).__usageScheduler.reload(schedule);
       }
 
       res.json(schedule);

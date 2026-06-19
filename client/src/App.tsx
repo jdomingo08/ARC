@@ -21,6 +21,7 @@ import PlatformDetailPage from "@/pages/platform-detail";
 import AdminPage from "@/pages/admin";
 import RiskAgentPage from "@/pages/risk-agent";
 import AgentModulesPage from "@/pages/agent-modules";
+import ApiCommandCenterPage from "@/pages/api-command-center";
 import VendorFormPage from "@/pages/vendor-form";
 import NotFound from "@/pages/not-found";
 
@@ -76,6 +77,7 @@ function AppContent() {
                 <Route path="/admin" component={AdminPage} />
                 <Route path="/risk" component={RiskAgentPage} />
                 <Route path="/agents" component={AgentModulesPage} />
+                <Route path="/integrations" component={ApiCommandCenterPage} />
                 <Route component={NotFound} />
               </Switch>
             </ErrorBoundary>

@@ -18,6 +18,9 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - **RiskFindings**: Vendor risk/breach findings linked to platforms
 - **AgentRunLogs**: Risk monitoring agent execution history
 - **AuditLogs**: Immutable change tracking
+- **ApiUsageSnapshots**: Daily per-provider usage & spend snapshots (API Command Center)
+- **ApiUsageSchedules**: Cron config for the daily usage sync + Slack digest
+- **ApiSyncLogs**: Audit trail of each usage sync run (manual/scheduled)
 
 ## Approval Workflow
 1. Requester submits intake form -> Request + Platform created
@@ -47,6 +50,7 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - `/platforms/:id` - Platform detail with findings
 - `/admin` - Attribute definitions, tiers, user roles
 - `/risk` - Risk monitoring agent console
+- `/integrations` - API Command Center: OpenAI org-wide usage & spend dashboard (extensible to more providers)
 
 ## Seed Data
 Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 risk findings, 3 attribute definitions
@@ -58,3 +62,16 @@ Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 r
 - `GOOGLE_ALLOWED_EXTRA_EMAILS` — comma-separated emails that bypass `GOOGLE_ALLOWED_DOMAIN`. When set, the `hd` account-picker hint is dropped so personal Gmail accounts can appear. Server-side verify still rejects anything not on the domain or this list.
 - `ADMIN_EMAILS` — comma-separated emails auto-promoted to admin on first SSO login
 - `ADMIN_REVIEWER_ROLE` — reviewerRole assigned when auto-promoting admins (default `technical_financial`)
+
+## AI / Integrations Env Vars
+- `OPENAI_API_KEY` — inference key used by the Risk Agent / tool insights (chat + responses APIs)
+- `OPENAI_MODEL` — inference model override (default `gpt-4o`)
+- `AI_PROVIDER` — LLM provider selector (default `openai`)
+
+### API Command Center (OpenAI usage monitoring)
+- `OPENAI_ADMIN_KEY` — **Organization Admin key** (`sk-admin-…`), separate from `OPENAI_API_KEY`. Required to pull org-wide usage (`/v1/organization/usage/completions`) and spend (`/v1/organization/costs`). Without it the dashboard shows a "not configured" banner.
+- `SLACK_WEBHOOK_URL` — Slack Incoming Webhook for the morning usage digest (simplest option)
+- `SLACK_BOT_TOKEN` + `SLACK_USAGE_CHANNEL` — alternative to the webhook; posts via `chat.postMessage` to the given channel (takes precedence over the webhook when both are set)
+- `APP_BASE_URL` (or `PUBLIC_URL`) — public base URL used to add a dashboard link to the Slack digest (optional)
+
+The daily sync runs in-process via `node-cron` (`server/integrations/usage-scheduler.ts`), default `0 6 * * *` (6 AM UTC), configurable in the UI by admins. It snapshots the prior day(s) into `api_usage_snapshots` and, if enabled + configured, posts a Slack digest.
