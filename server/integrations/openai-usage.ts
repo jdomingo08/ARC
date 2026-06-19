@@ -54,6 +54,48 @@ export class OpenAIUsageClient {
     return Boolean(this.adminKey);
   }
 
+  /**
+   * Lightweight connectivity + permission check. Makes a minimal 1-day,
+   * 1-bucket request to the usage endpoint and reports the outcome WITHOUT
+   * throwing, so callers can surface the exact error to the user.
+   */
+  async testConnection(): Promise<{ ok: boolean; status?: number; message: string }> {
+    if (!this.adminKey) {
+      return { ok: false, message: "OPENAI_ADMIN_KEY is not set. Add it as an Organization Admin key (sk-admin-…) and restart." };
+    }
+
+    const startTime = startOfUtcDay(new Date()) - SECONDS_PER_DAY; // yesterday 00:00 UTC
+    const qs = new URLSearchParams({ start_time: String(startTime), bucket_width: "1d", limit: "1" });
+
+    try {
+      const res = await fetch(`${USAGE_URL}?${qs.toString()}`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${this.adminKey}`, "Content-Type": "application/json" },
+      });
+
+      if (res.ok) {
+        return { ok: true, status: res.status, message: "Connected to the OpenAI Admin Usage API successfully." };
+      }
+
+      const body = await res.text().catch(() => "");
+      let detail = body.slice(0, 300);
+      try {
+        detail = JSON.parse(body)?.error?.message || detail;
+      } catch {
+        /* keep raw body */
+      }
+      const hint =
+        res.status === 401
+          ? " — the key is invalid or revoked."
+          : res.status === 403
+            ? " — the key lacks admin/usage permissions. Use an Organization Admin key (sk-admin-…), not a project key."
+            : "";
+      return { ok: false, status: res.status, message: `OpenAI returned ${res.status} ${res.statusText}: ${detail}${hint}` };
+    } catch (err: any) {
+      return { ok: false, message: `Request failed: ${err?.message || "unknown error"}` };
+    }
+  }
+
   private async fetchAllPages(url: string, baseParams: Record<string, string | string[]>): Promise<OpenAIBucket[]> {
     if (!this.adminKey) {
       throw new Error("OPENAI_ADMIN_KEY is not configured");

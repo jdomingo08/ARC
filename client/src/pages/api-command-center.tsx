@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   XCircle,
   MessageSquare,
+  PlugZap,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -82,6 +83,7 @@ export default function ApiCommandCenterPage() {
   const isAdmin = user?.role === "admin";
 
   const [windowDays, setWindowDays] = useState("30");
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Schedule local state
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean | null>(null);
@@ -129,6 +131,26 @@ export default function ApiCommandCenterPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Sync failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/integrations/openai/test");
+      return res.json() as Promise<{ ok: boolean; message: string; status?: number }>;
+    },
+    onSuccess: (data) => {
+      setTestResult({ ok: data.ok, message: data.message });
+      toast({
+        title: data.ok ? "Connection OK" : "Connection failed",
+        description: data.message,
+        variant: data.ok ? undefined : "destructive",
+      });
+      if (data.ok) queryClient.invalidateQueries({ queryKey: ["/api/integrations/openai/status"] });
+    },
+    onError: (error: Error) => {
+      setTestResult({ ok: false, message: error.message });
+      toast({ title: "Connection failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -212,6 +234,20 @@ export default function ApiCommandCenterPage() {
           </Select>
           {isAdmin && (
             <Button
+              variant="outline"
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending}
+              data-testid="button-acc-test"
+            >
+              {testMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Testing…</>
+              ) : (
+                <><PlugZap className="h-4 w-4 mr-1" /> Test connection</>
+              )}
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending || !status?.adminKeyConfigured}
               data-testid="button-acc-sync"
@@ -233,6 +269,25 @@ export default function ApiCommandCenterPage() {
         </Badge>
         <Badge variant="outline" className="text-muted-foreground">More providers coming soon</Badge>
       </div>
+
+      {/* Test connection result */}
+      {testResult && (
+        <div
+          className={`flex items-start gap-2 rounded-md border p-3 text-sm ${
+            testResult.ok
+              ? "border-green-500/40 bg-green-500/5 text-green-700 dark:text-green-400"
+              : "border-destructive/40 bg-destructive/5 text-destructive"
+          }`}
+          data-testid="acc-test-result"
+        >
+          {testResult.ok ? (
+            <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+          ) : (
+            <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          )}
+          <span>{testResult.message}</span>
+        </div>
+      )}
 
       {/* Not-configured banner */}
       {status && !status.adminKeyConfigured && (

@@ -1133,6 +1133,17 @@ export async function registerRoutes(
     }
   });
 
+  // Connectivity / permission check (admin) — verifies OPENAI_ADMIN_KEY works.
+  app.post("/api/integrations/openai/test", requireAuth, requireRole("admin"), async (_req, res) => {
+    try {
+      const client = new OpenAIUsageClient();
+      const result = await client.testConnection();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
   app.get("/api/integrations/openai/logs", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
     try {
       res.json(await storage.getApiSyncLogs(OPENAI, 25));
