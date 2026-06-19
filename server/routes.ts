@@ -7,8 +7,8 @@ import { storage } from "./storage";
 import { configurePassport } from "./auth";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
-import { OpenAIUsageClient } from "./integrations/openai-usage";
-import { runOpenAiSync } from "./integrations/usage-service";
+import { getProviderMeta, listProviderKeys } from "./integrations/registry";
+import { runProviderSync } from "./integrations/usage-service";
 import { isSlackConfigured } from "./integrations/slack-notifier";
 import { getLogoUrl } from "./logo-resolver";
 import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-insights-prompts";
@@ -1012,24 +1012,52 @@ export async function registerRoutes(
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // API Command Center — OpenAI usage & spend monitoring
+  // API Command Center — multi-provider usage monitoring (OpenAI, ElevenLabs)
   // ─────────────────────────────────────────────────────────────────────────
 
-  const OPENAI = "openai";
   const utcDay = (offsetDays = 0) => {
     const d = new Date();
     d.setUTCDate(d.getUTCDate() + offsetDays);
     return d.toISOString().slice(0, 10);
   };
 
-  // Configuration / readiness status for the dashboard banner.
-  app.get("/api/integrations/openai/status", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+  // List configured/available providers for the dashboard's provider switcher.
+  app.get("/api/integrations/providers", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
     try {
-      const client = new OpenAIUsageClient();
-      const latest = await storage.getLatestUsageSnapshot(OPENAI);
+      res.json(
+        listProviderKeys().map((k) => {
+          const m = getProviderMeta(k)!;
+          return {
+            key: m.key,
+            label: m.label,
+            hasCost: m.hasCost,
+            hasRequests: m.hasRequests,
+            supportsQuota: m.supportsQuota,
+            unitLabel: m.unitLabel,
+            configured: m.create().isConfigured(),
+          };
+        }),
+      );
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Configuration / readiness status for a provider.
+  app.get("/api/integrations/:provider/status", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
+    try {
+      const meta = getProviderMeta(String(req.params.provider));
+      if (!meta) return res.status(404).json({ message: `Unknown provider: ${req.params.provider}` });
+      const latest = await storage.getLatestUsageSnapshot(meta.key);
       res.json({
-        provider: OPENAI,
-        adminKeyConfigured: client.isConfigured(),
+        provider: meta.key,
+        label: meta.label,
+        hasCost: meta.hasCost,
+        hasRequests: meta.hasRequests,
+        supportsQuota: meta.supportsQuota,
+        unitLabel: meta.unitLabel,
+        envVar: meta.envVar,
+        configured: meta.create().isConfigured(),
         slackConfigured: isSlackConfigured(),
         latestSnapshotDate: latest?.usageDate ?? null,
       });
@@ -1038,14 +1066,17 @@ export async function registerRoutes(
     }
   });
 
-  // Aggregated dashboard payload: daily series + rolled-up totals over a window.
-  app.get("/api/integrations/openai/summary", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
+  // Aggregated dashboard payload: daily series + rolled-up totals (+ live quota).
+  app.get("/api/integrations/:provider/summary", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
     try {
+      const meta = getProviderMeta(String(req.params.provider));
+      if (!meta) return res.status(404).json({ message: `Unknown provider: ${req.params.provider}` });
+
       const days = Math.min(Math.max(parseInt(String(req.query.days ?? "30"), 10) || 30, 1), 180);
       const start = new Date();
       start.setUTCDate(start.getUTCDate() - (days - 1));
       const startKey = start.toISOString().slice(0, 10);
-      const snapshots = await storage.getUsageSnapshots(OPENAI, { startDate: startKey });
+      const snapshots = await storage.getUsageSnapshots(meta.key, { startDate: startKey });
 
       const today = utcDay();
       const completed = snapshots.filter((s) => s.usageDate < today);
@@ -1053,37 +1084,52 @@ export async function registerRoutes(
       const totals = snapshots.reduce(
         (acc, s) => {
           acc.costUsd += Number(s.costUsd);
+          acc.units += s.units;
           acc.inputTokens += s.inputTokens;
           acc.outputTokens += s.outputTokens;
           acc.totalTokens += s.totalTokens;
           acc.numRequests += s.numRequests;
           return acc;
         },
-        { costUsd: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, numRequests: 0 },
+        { costUsd: 0, units: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, numRequests: 0 },
       );
       totals.costUsd = Math.round(totals.costUsd * 100) / 100;
 
-      // Aggregate token usage by model across the window.
-      const modelMap = new Map<string, { model: string; inputTokens: number; outputTokens: number; numRequests: number }>();
+      // Aggregate usage by model across the window (units is the shared metric).
+      const modelMap = new Map<string, { model: string; units: number; inputTokens: number; outputTokens: number; numRequests: number }>();
       for (const s of snapshots) {
         for (const m of (s.byModel as any[] | null) || []) {
-          const cur = modelMap.get(m.model) || { model: m.model, inputTokens: 0, outputTokens: 0, numRequests: 0 };
+          const cur = modelMap.get(m.model) || { model: m.model, units: 0, inputTokens: 0, outputTokens: 0, numRequests: 0 };
+          cur.units += Number(m.units || 0);
           cur.inputTokens += Number(m.inputTokens || 0);
           cur.outputTokens += Number(m.outputTokens || 0);
           cur.numRequests += Number(m.numRequests || 0);
           modelMap.set(m.model, cur);
         }
       }
-      const byModel = Array.from(modelMap.values()).sort(
-        (a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens),
-      );
+      const byModel = Array.from(modelMap.values()).sort((a, b) => b.units - a.units);
+
+      // Live plan quota for providers that expose it (ElevenLabs).
+      let quota = null;
+      if (meta.supportsQuota) {
+        const client = meta.create();
+        if (client.isConfigured() && client.getQuota) {
+          quota = await client.getQuota();
+        }
+      }
 
       res.json({
-        provider: OPENAI,
+        provider: meta.key,
+        label: meta.label,
+        hasCost: meta.hasCost,
+        hasRequests: meta.hasRequests,
+        supportsQuota: meta.supportsQuota,
+        unitLabel: meta.unitLabel,
         windowDays: days,
         snapshots,
         totals,
         byModel,
+        quota,
         yesterday: completed[completed.length - 1] ?? null,
         today: snapshots.find((s) => s.usageDate === today) ?? null,
       });
@@ -1092,17 +1138,19 @@ export async function registerRoutes(
     }
   });
 
-  // Manual sync (admin) — backfills/refreshes the last N days from OpenAI.
-  app.post("/api/integrations/openai/sync", requireAuth, requireRole("admin"), async (req, res) => {
+  // Manual sync (admin) — backfills/refreshes the last N days for a provider.
+  app.post("/api/integrations/:provider/sync", requireAuth, requireRole("admin"), async (req, res) => {
     try {
-      const client = new OpenAIUsageClient();
-      if (!client.isConfigured()) {
+      const meta = getProviderMeta(String(req.params.provider));
+      if (!meta) return res.status(404).json({ message: `Unknown provider: ${req.params.provider}` });
+
+      if (!meta.create().isConfigured()) {
         return res.status(503).json({
-          message: "OpenAI Admin key not configured. Set OPENAI_ADMIN_KEY (an Organization Admin key, sk-admin-…) to enable usage syncing.",
+          message: `${meta.label} not configured. Set the ${meta.envVar} environment variable to enable usage syncing.`,
         });
       }
 
-      const recentLogs = await storage.getApiSyncLogs(OPENAI, 5);
+      const recentLogs = await storage.getApiSyncLogs(meta.key, 5);
       if (recentLogs.some((l) => l.status === "running")) {
         return res.status(409).json({ message: "A usage sync is already in progress. Please wait for it to finish." });
       }
@@ -1114,44 +1162,48 @@ export async function registerRoutes(
       const startDate = new Date();
       startDate.setUTCDate(startDate.getUTCDate() - days);
 
-      const result = await runOpenAiSync(storage, {
+      const result = await runProviderSync(storage, meta.key, {
         startDate,
         endDate,
         trigger: "manual",
         initiatedBy: user.id,
-        sendSlackDigest: false,
       });
 
       res.json({
         summary: result.summary,
         daysFetched: result.daysFetched,
         costUsd: result.costUsd,
-        totalTokens: result.totalTokens,
+        totalUnits: result.totalUnits,
+        unitLabel: result.unitLabel,
       });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
-  // Connectivity / permission check (admin) — verifies OPENAI_ADMIN_KEY works.
-  app.post("/api/integrations/openai/test", requireAuth, requireRole("admin"), async (_req, res) => {
+  // Connectivity / permission check (admin) — verifies the provider's key works.
+  app.post("/api/integrations/:provider/test", requireAuth, requireRole("admin"), async (req, res) => {
     try {
-      const client = new OpenAIUsageClient();
-      const result = await client.testConnection();
+      const meta = getProviderMeta(String(req.params.provider));
+      if (!meta) return res.status(404).json({ ok: false, message: `Unknown provider: ${req.params.provider}` });
+      const result = await meta.create().testConnection();
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ ok: false, message: e.message });
     }
   });
 
-  app.get("/api/integrations/openai/logs", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
+  app.get("/api/integrations/:provider/logs", requireAuth, requireRole("reviewer", "chair", "admin"), async (req, res) => {
     try {
-      res.json(await storage.getApiSyncLogs(OPENAI, 25));
+      const meta = getProviderMeta(String(req.params.provider));
+      if (!meta) return res.status(404).json({ message: `Unknown provider: ${req.params.provider}` });
+      res.json(await storage.getApiSyncLogs(meta.key, 25));
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
   });
 
+  // Schedule is module-wide: one cron drives the daily sync for all providers.
   app.get("/api/integrations/usage-schedule", requireAuth, requireRole("reviewer", "chair", "admin"), async (_req, res) => {
     try {
       const schedule = await storage.getUsageSchedule();
@@ -1161,7 +1213,6 @@ export async function registerRoutes(
           cronExpression: "0 6 * * *",
           lookbackDays: 3,
           slackDigestEnabled: true,
-          provider: OPENAI,
         },
       );
     } catch (e: any) {
@@ -1178,7 +1229,6 @@ export async function registerRoutes(
         cronExpression,
         lookbackDays,
         slackDigestEnabled,
-        provider: OPENAI,
         createdBy: user.id,
       });
 

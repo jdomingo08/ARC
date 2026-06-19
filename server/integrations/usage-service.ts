@@ -1,16 +1,15 @@
 /**
  * Usage sync orchestration for the API Command Center.
  *
- * Ties together the provider client (OpenAIUsageClient), persistence (storage),
- * a sync-log audit trail, and the optional Slack morning digest.
+ * Provider-agnostic: resolves a client from the registry, fetches normalized
+ * daily usage, upserts snapshots, and records a sync-log audit entry. The Slack
+ * digest is composed by the scheduler (so it can summarize all providers in one
+ * message), not here.
  */
 
 import type { IStorage } from "../storage";
 import type { ApiUsageSnapshot } from "@shared/schema";
-import { OpenAIUsageClient } from "./openai-usage";
-import { postSlackUsageDigest } from "./slack-notifier";
-
-const PROVIDER = "openai";
+import { getProviderMeta } from "./registry";
 
 function todayUtcDay(): string {
   return new Date().toISOString().slice(0, 10);
@@ -21,57 +20,52 @@ export interface SyncOptions {
   endDate: Date;
   trigger: "manual" | "scheduled";
   initiatedBy?: string | null;
-  sendSlackDigest?: boolean;
 }
 
 export interface SyncResult {
+  provider: string;
   daysFetched: number;
   costUsd: number;
-  totalTokens: number;
+  totalUnits: number;
+  unitLabel: string;
   summary: string;
-  slackDigestSent: boolean;
+  /** Most recent fully-completed day (before today) — used for the digest. */
+  headline: ApiUsageSnapshot | null;
   snapshots: ApiUsageSnapshot[];
 }
 
-/** Sum the cost of snapshots whose usageDate falls within the last `days` days. */
-async function rollingCost(storage: IStorage, days: number): Promise<number> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - days);
-  const sinceKey = since.toISOString().slice(0, 10);
-  const recent = await storage.getUsageSnapshots(PROVIDER, { startDate: sinceKey });
-  return recent.reduce((sum, s) => sum + Number(s.costUsd), 0);
-}
-
 /**
- * Fetch OpenAI usage/cost for the given range, upsert daily snapshots, and
- * (optionally) post the Slack morning digest for the most recent completed day.
- * Records a sync log either way. Throws on hard failures after logging them.
+ * Fetch a provider's usage for the given range, upsert daily snapshots, and
+ * record a sync log. Throws on hard failures after logging them.
  */
-export async function runOpenAiSync(storage: IStorage, opts: SyncOptions): Promise<SyncResult> {
-  const { startDate, endDate, trigger, initiatedBy, sendSlackDigest } = opts;
+export async function runProviderSync(storage: IStorage, providerKey: string, opts: SyncOptions): Promise<SyncResult> {
+  const meta = getProviderMeta(providerKey);
+  if (!meta) throw new Error(`Unknown provider: ${providerKey}`);
 
   const log = await storage.createApiSyncLog({
-    provider: PROVIDER,
-    trigger,
+    provider: providerKey,
+    trigger: opts.trigger,
     status: "running",
-    rangeStart: startDate.toISOString().slice(0, 10),
-    rangeEnd: endDate.toISOString().slice(0, 10),
-    initiatedBy: initiatedBy ?? null,
+    rangeStart: opts.startDate.toISOString().slice(0, 10),
+    rangeEnd: opts.endDate.toISOString().slice(0, 10),
+    initiatedBy: opts.initiatedBy ?? null,
   });
 
   try {
-    const client = new OpenAIUsageClient();
+    const client = meta.create();
     if (!client.isConfigured()) {
-      throw new Error("OPENAI_ADMIN_KEY is not configured");
+      throw new Error(`${meta.envVar} is not configured`);
     }
 
-    const normalized = await client.fetchDailyUsage(startDate, endDate);
+    const normalized = await client.fetchDailyUsage(opts.startDate, opts.endDate);
 
     const saved: ApiUsageSnapshot[] = [];
     for (const day of normalized) {
       const snapshot = await storage.upsertUsageSnapshot({
-        provider: PROVIDER,
+        provider: providerKey,
         usageDate: day.usageDate,
+        units: day.units,
+        unitLabel: day.unitLabel,
         inputTokens: day.inputTokens,
         outputTokens: day.outputTokens,
         cachedInputTokens: day.cachedInputTokens,
@@ -88,44 +82,31 @@ export async function runOpenAiSync(storage: IStorage, opts: SyncOptions): Promi
     }
 
     const costUsd = normalized.reduce((s, d) => s + d.costUsd, 0);
-    const totalTokens = normalized.reduce((s, d) => s + d.totalTokens, 0);
+    const totalUnits = normalized.reduce((s, d) => s + d.units, 0);
+    const today = todayUtcDay();
+    const headline =
+      saved.filter((s) => s.usageDate < today).sort((a, b) => b.usageDate.localeCompare(a.usageDate))[0] ?? null;
 
-    // ── Slack morning digest (most recent COMPLETED day, i.e. before today) ──
-    let slackDigestSent = false;
-    if (sendSlackDigest) {
-      const today = todayUtcDay();
-      const completed = saved
-        .filter((s) => s.usageDate < today)
-        .sort((a, b) => b.usageDate.localeCompare(a.usageDate));
-      const headline = completed[0];
-      if (headline) {
-        const thirtyDayCostUsd = await rollingCost(storage, 30);
-        const base = process.env.APP_BASE_URL || process.env.PUBLIC_URL;
-        const result = await postSlackUsageDigest({
-          day: headline,
-          thirtyDayCostUsd,
-          dashboardUrl: base ? `${base.replace(/\/$/, "")}/integrations` : undefined,
-        });
-        slackDigestSent = result.sent;
-        if (!result.sent && result.reason && result.reason !== "not_configured") {
-          console.warn(`[UsageService] Slack digest not sent: ${result.reason}`);
-        }
-      }
-    }
+    const summary = meta.hasCost
+      ? `Synced ${normalized.length} day(s) · $${costUsd.toFixed(2)} · ${totalUnits.toLocaleString("en-US")} ${meta.unitLabel}`
+      : `Synced ${normalized.length} day(s) · ${totalUnits.toLocaleString("en-US")} ${meta.unitLabel}`;
 
-    const summary = `Synced ${normalized.length} day(s) · $${costUsd.toFixed(2)} · ${totalTokens.toLocaleString("en-US")} tokens`;
+    await storage.updateApiSyncLog(log.id, { status: "completed", daysFetched: normalized.length, summary });
 
-    await storage.updateApiSyncLog(log.id, {
-      status: "completed",
-      daysFetched: normalized.length,
-      summary,
-      slackDigestSent,
-    });
-
-    return { daysFetched: normalized.length, costUsd, totalTokens, summary, slackDigestSent, snapshots: saved };
+    return { provider: providerKey, daysFetched: normalized.length, costUsd, totalUnits, unitLabel: meta.unitLabel, summary, headline, snapshots: saved };
   } catch (err: any) {
-    const message = err?.message || "Unknown error";
-    await storage.updateApiSyncLog(log.id, { status: "failed", error: message });
+    await storage.updateApiSyncLog(log.id, { status: "failed", error: err?.message || "Unknown error" });
     throw err;
   }
+}
+
+/** Rolling cost + unit totals for a provider over the last `days` days. */
+export async function rollingUsage(storage: IStorage, providerKey: string, days: number): Promise<{ costUsd: number; units: number }> {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - days);
+  const recent = await storage.getUsageSnapshots(providerKey, { startDate: since.toISOString().slice(0, 10) });
+  return {
+    costUsd: recent.reduce((s, r) => s + Number(r.costUsd), 0),
+    units: recent.reduce((s, r) => s + r.units, 0),
+  };
 }

@@ -68,10 +68,13 @@ Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 r
 - `OPENAI_MODEL` — inference model override (default `gpt-4o`)
 - `AI_PROVIDER` — LLM provider selector (default `openai`)
 
-### API Command Center (OpenAI usage monitoring)
-- `OPENAI_ADMIN_KEY` — **Organization Admin key** (`sk-admin-…`), separate from `OPENAI_API_KEY`. Required to pull org-wide usage (`/v1/organization/usage/completions`) and spend (`/v1/organization/costs`). Without it the dashboard shows a "not configured" banner.
+### API Command Center (multi-provider usage monitoring)
+Providers are defined in `server/integrations/registry.ts`; routes/scheduler iterate over it. Snapshots are stored per provider per UTC day in `api_usage_snapshots`, using a generic `units`/`unit_label` pair (OpenAI → tokens; ElevenLabs → characters) plus cost for providers that expose it.
+
+- `OPENAI_ADMIN_KEY` — **Organization Admin key** (`sk-admin-…`), separate from `OPENAI_API_KEY`. Pulls org-wide usage (`/v1/organization/usage/completions`) and spend (`/v1/organization/costs`).
+- `ELEVENLABS_API_KEY` — ElevenLabs API key. Pulls character usage (`/v1/usage/character-stats`) and plan quota (`/v1/user/subscription`) via the `xi-api-key` header. ElevenLabs reports characters/credits, not USD, so the dashboard shows credit usage + plan quota instead of dollar spend.
 - `SLACK_WEBHOOK_URL` — Slack Incoming Webhook for the morning usage digest (simplest option)
-- `SLACK_BOT_TOKEN` + `SLACK_USAGE_CHANNEL` — alternative to the webhook; posts via `chat.postMessage` to the given channel (takes precedence over the webhook when both are set)
+- `SLACK_BOT_TOKEN` + `SLACK_USAGE_CHANNEL` — alternative to the webhook; posts via `chat.postMessage` (takes precedence over the webhook when both are set)
 - `APP_BASE_URL` (or `PUBLIC_URL`) — public base URL used to add a dashboard link to the Slack digest (optional)
 
-The daily sync runs in-process via `node-cron` (`server/integrations/usage-scheduler.ts`), default `0 6 * * *` (6 AM UTC), configurable in the UI by admins. It snapshots the prior day(s) into `api_usage_snapshots` and, if enabled + configured, posts a Slack digest.
+A single module-wide cron (`server/integrations/usage-scheduler.ts`, default `0 6 * * *` UTC, configurable in the UI by admins) syncs every configured provider each morning and posts one combined Slack digest. Each provider degrades gracefully when its key is unset.

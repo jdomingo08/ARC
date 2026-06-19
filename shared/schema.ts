@@ -351,11 +351,11 @@ export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
 // API Command Center
 //
 // Central monitoring hub for the third-party APIs the organization consumes.
-// OpenAI is the first integration; tables are keyed by `provider` so additional
-// providers (Anthropic, Google, etc.) can be added without schema changes.
+// OpenAI and ElevenLabs are the first integrations; tables are keyed by
+// `provider` so additional providers can be added without schema changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const apiProviderEnum = z.enum(["openai"]);
+export const apiProviderEnum = z.enum(["openai", "elevenlabs"]);
 export type ApiProvider = z.infer<typeof apiProviderEnum>;
 
 // One row per provider per UTC day — a snapshot of that day's usage and spend.
@@ -363,6 +363,10 @@ export const apiUsageSnapshots = pgTable("api_usage_snapshots", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   provider: text("provider").notNull().default("openai"),
   usageDate: text("usage_date").notNull(), // YYYY-MM-DD (UTC)
+  // Generic primary usage quantity so providers with different units share one
+  // schema: OpenAI -> total tokens ("tokens"); ElevenLabs -> credits ("characters").
+  units: integer("units").notNull().default(0),
+  unitLabel: text("unit_label").notNull().default("tokens"),
   inputTokens: integer("input_tokens").notNull().default(0),
   outputTokens: integer("output_tokens").notNull().default(0),
   cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
@@ -370,7 +374,7 @@ export const apiUsageSnapshots = pgTable("api_usage_snapshots", {
   numRequests: integer("num_requests").notNull().default(0),
   costUsd: decimal("cost_usd", { precision: 12, scale: 4 }).notNull().default("0"),
   currency: text("currency").notNull().default("usd"),
-  byModel: jsonb("by_model").default([]),       // [{ model, inputTokens, outputTokens, numRequests }]
+  byModel: jsonb("by_model").default([]),       // [{ model, units, inputTokens, outputTokens, numRequests }]
   byLineItem: jsonb("by_line_item").default([]), // [{ name, costUsd }]
   byProject: jsonb("by_project").default([]),    // [{ projectId, costUsd }]
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
@@ -425,6 +429,8 @@ export type InsertApiSyncLog = z.infer<typeof insertApiSyncLogSchema>;
 // Normalized per-day usage payload returned by provider clients before persistence.
 export interface NormalizedDailyUsage {
   usageDate: string; // YYYY-MM-DD (UTC)
+  units: number;
+  unitLabel: string;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
@@ -432,7 +438,16 @@ export interface NormalizedDailyUsage {
   numRequests: number;
   costUsd: number;
   currency: string;
-  byModel: Array<{ model: string; inputTokens: number; outputTokens: number; numRequests: number }>;
+  byModel: Array<{ model: string; units: number; inputTokens: number; outputTokens: number; numRequests: number }>;
   byLineItem: Array<{ name: string; costUsd: number }>;
   byProject: Array<{ projectId: string; costUsd: number }>;
+}
+
+// Live, non-persisted plan/quota info for providers that expose it (ElevenLabs).
+export interface ProviderQuota {
+  tier?: string | null;
+  used: number;
+  limit: number | null;
+  unitLabel: string;
+  resetAt?: string | null; // ISO date when the quota resets
 }
