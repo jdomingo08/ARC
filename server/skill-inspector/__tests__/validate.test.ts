@@ -27,6 +27,7 @@ describe("validateGitHubUrl", () => {
 
   it("rejects embedded credentials and non-standard ports", () => {
     expect(validateGitHubUrl("https://user:pass@github.com/owner/repo").ok).toBe(false);
+    expect(validateGitHubUrl("https://github.com@evil.com/owner/repo").ok).toBe(false);
     expect(validateGitHubUrl("https://github.com:8080/owner/repo").ok).toBe(false);
   });
 
