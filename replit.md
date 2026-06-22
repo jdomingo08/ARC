@@ -21,6 +21,7 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - **ApiUsageSnapshots**: Daily per-provider usage & spend snapshots (API Command Center)
 - **ApiUsageSchedules**: Cron config for the daily usage sync + Slack digest
 - **ApiSyncLogs**: Audit trail of each usage sync run (manual/scheduled)
+- **SkillScans**: Skill Inspector scan results (NVIDIA SkillSpector verdicts + findings)
 
 ## Approval Workflow
 1. Requester submits intake form -> Request + Platform created
@@ -39,6 +40,7 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - `client/src/components/app-sidebar.tsx` - Navigation sidebar
 - `client/src/components/status-badge.tsx` - Status/role/risk badges
 - `client/src/components/review-panel.tsx` - Review submission form
+- `server/skill-inspector/*` - SkillSpector integration (inspector pipeline, input validation, output parser, venv CLI path)
 
 ## Pages
 - `/` - Dashboard with stats and recent requests
@@ -51,6 +53,7 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - `/admin` - Attribute definitions, tiers, user roles
 - `/risk` - Risk monitoring agent console
 - `/integrations` - API Command Center: OpenAI org-wide usage & spend dashboard (extensible to more providers)
+- `/skill-inspector` - Skill Inspector: scan a GitHub repo URL or uploaded skill file with NVIDIA SkillSpector for security risks
 
 ## Seed Data
 Automatically seeds on first run: 8 users, 4 platforms, 2 requests, 3 tiers, 3 risk findings, 3 attribute definitions
@@ -78,3 +81,12 @@ Providers are defined in `server/integrations/registry.ts`; routes/scheduler ite
 - `APP_BASE_URL` (or `PUBLIC_URL`) — public base URL used to add a dashboard link to the Slack digest (optional)
 
 A single module-wide cron (`server/integrations/usage-scheduler.ts`, default `0 6 * * *` UTC, configurable in the UI by admins) syncs every configured provider each morning and posts one combined Slack digest. Each provider degrades gracefully when its key is unset.
+
+### Skill Inspector
+Wraps NVIDIA SkillSpector (Python 3.12), installed into a `.venv` baked into the Replit build (see `replit.nix` + `script/build.ts`). The scanner is invoked as a child process and streams live progress to the client over SSE. Scan results are persisted to the `skill_scans` table and surfaced in "My scans".
+
+- `OPENAI_API_KEY` — reused from the main AI config; passed to SkillSpector for its LLM analysis stage
+- `SKILLSPECTOR_PROVIDER` — set to `openai` by the server when spawning the scanner (not required in `.env`)
+- `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`)
+
+If the `.venv` is absent the feature degrades gracefully: `GET /api/skill-inspector/status` returns `scannerAvailable: false` and scan requests return a friendly 503 without crashing the app.

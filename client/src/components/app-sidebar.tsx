@@ -28,6 +28,7 @@ import {
   Bot,
   Mail,
   Gauge,
+  ScanSearch,
 } from "lucide-react";
 
 export function AppSidebar() {
@@ -47,6 +48,7 @@ export function AppSidebar() {
     { title: "Risk Agent", url: "/risk", icon: ShieldAlert, roles: ["reviewer", "chair", "admin"] },
     { title: "Agent Modules", url: "/agents", icon: Bot, roles: ["reviewer", "chair", "admin"] },
     { title: "API Command Center", url: "/integrations", icon: Gauge, roles: ["reviewer", "chair", "admin"] },
+    { title: "Skill Inspector", url: "/skill-inspector", icon: ScanSearch, roles: ["reviewer", "chair", "admin"] },
   ];
 
   const filteredMain = mainItems.filter(item => user && item.roles.includes(user.role));
