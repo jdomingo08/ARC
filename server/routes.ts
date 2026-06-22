@@ -23,6 +23,9 @@ import {
   objectExists,
   putObject,
 } from "./object-storage";
+import { SkillInspector } from "./skill-inspector/inspector";
+import { validateGitHubUrl, validateUploadName } from "./skill-inspector/validate";
+import { skillSpectorAvailable } from "./skill-inspector/skillspector-cli";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1899,6 +1902,127 @@ export async function registerRoutes(
       res.status(500).json({ message: e.message });
     }
   });
+
+  // --- Skill Inspector ---
+  app.get("/api/skill-inspector/status", requireAuth, async (_req, res) => {
+    try {
+      res.json({
+        scannerAvailable: skillSpectorAvailable(),
+        aiConfigured: !!process.env.OPENAI_API_KEY,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/skill-inspector/scans", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const scans = await storage.getSkillScansByUser(user.id);
+      res.json(scans);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.get("/api/skill-inspector/scans/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const scan = await storage.getSkillScan(req.params.id as string);
+      if (!scan) return res.status(404).json({ message: "Scan not found" });
+      if (scan.createdBy !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Insufficient permissions" });
+      }
+      res.json(scan);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post(
+    "/api/skill-inspector/scan",
+    requireAuth,
+    requireRole("reviewer", "chair", "admin"),
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!skillSpectorAvailable()) {
+          return res
+            .status(503)
+            .json({ message: "Skill scanner is not available on this server yet." });
+        }
+        const user = (req as any).user as User;
+        const inputType = req.body.inputType === "upload" ? "upload" : "url";
+
+        // Validate input up front (before opening the SSE stream).
+        let target: string;
+        let fileBuffer: Buffer | undefined;
+        let fileName: string | undefined;
+        if (inputType === "url") {
+          const v = validateGitHubUrl(req.body.target || "");
+          if (!v.ok) return res.status(400).json({ message: v.error });
+          target = v.url;
+        } else {
+          const file = req.file;
+          if (!file) return res.status(400).json({ message: "No file uploaded" });
+          const v = validateUploadName(file.originalname);
+          if (!v.ok) return res.status(400).json({ message: v.error });
+          target = file.originalname;
+          fileBuffer = file.buffer;
+          fileName = file.originalname;
+        }
+
+        // Self-heal: fail any scan stuck "running" longer than the max scan duration (orphaned by an instance teardown).
+        await storage.failStaleRunningSkillScans(user.id, new Date(Date.now() - 6 * 60 * 1000));
+
+        // One running scan per user (prevents double-submit / runaway).
+        const running = await storage.getRunningSkillScansByUser(user.id);
+        if (running.length > 0) {
+          return res
+            .status(409)
+            .json({ message: "You already have a scan in progress. Please wait for it to finish." });
+        }
+
+        // Create the durable run row (status: running) up front.
+        const scan = await storage.createSkillScan({
+          createdBy: user.id,
+          createdByName: user.name,
+          inputType,
+          target,
+          status: "running",
+        } as any);
+
+        // Open the SSE stream.
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+
+        const sendEvent = (event: string, data: any) => {
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+
+        const inspector = new SkillInspector(storage);
+        inspector.on("scan-start", (d) => sendEvent("scan-start", { ...d, scanId: scan.id }));
+        inspector.on("progress", (d) => sendEvent("progress", d));
+        inspector.on("complete", (d) => {
+          sendEvent("complete", d);
+          res.end();
+        });
+        inspector.on("error", (d) => {
+          sendEvent("error", d);
+          res.end();
+        });
+        req.on("close", () => inspector.abort());
+
+        await inspector.run({ scanId: scan.id, inputType, target, fileBuffer, fileName });
+      } catch (e: any) {
+        if (!res.headersSent) res.status(500).json({ message: e.message });
+        else res.end();
+      }
+    },
+  );
 
   return httpServer;
 }

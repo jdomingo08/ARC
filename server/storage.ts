@@ -28,6 +28,8 @@ import {
   type ApiUsageSnapshot, type InsertApiUsageSnapshot,
   type ApiUsageSchedule, type InsertApiUsageSchedule,
   type ApiSyncLog, type InsertApiSyncLog,
+  skillScans,
+  type SkillScan, type InsertSkillScan,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -128,6 +130,15 @@ export interface IStorage {
   createApiSyncLog(log: InsertApiSyncLog): Promise<ApiSyncLog>;
   updateApiSyncLog(id: string, data: Partial<ApiSyncLog>): Promise<void>;
   getApiSyncLogs(provider?: string, limit?: number): Promise<ApiSyncLog[]>;
+
+  // Skill Inspector
+  createSkillScan(scan: InsertSkillScan): Promise<SkillScan>;
+  getSkillScan(id: string): Promise<SkillScan | undefined>;
+  getSkillScansByUser(userId: string): Promise<SkillScan[]>;
+  getAllSkillScans(): Promise<SkillScan[]>;
+  getRunningSkillScansByUser(userId: string): Promise<SkillScan[]>;
+  failStaleRunningSkillScans(userId: string, olderThan: Date): Promise<void>;
+  updateSkillScan(id: string, data: Partial<SkillScan>): Promise<SkillScan | undefined>;
 
   seedData(): Promise<void>;
   runStartupMigrations(): Promise<void>;
@@ -481,6 +492,58 @@ export class DatabaseStorage implements IStorage {
   async deleteWorkflowStep(id: string): Promise<boolean> {
     const result = await db.delete(workflowSteps).where(eq(workflowSteps.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Skill Inspector
+  async createSkillScan(scan: InsertSkillScan): Promise<SkillScan> {
+    const [created] = await db.insert(skillScans).values(scan).returning();
+    return created;
+  }
+
+  async getSkillScan(id: string): Promise<SkillScan | undefined> {
+    const [scan] = await db.select().from(skillScans).where(eq(skillScans.id, id));
+    return scan;
+  }
+
+  async getSkillScansByUser(userId: string): Promise<SkillScan[]> {
+    return db
+      .select()
+      .from(skillScans)
+      .where(eq(skillScans.createdBy, userId))
+      .orderBy(desc(skillScans.createdAt));
+  }
+
+  async getAllSkillScans(): Promise<SkillScan[]> {
+    return db.select().from(skillScans).orderBy(desc(skillScans.createdAt));
+  }
+
+  async getRunningSkillScansByUser(userId: string): Promise<SkillScan[]> {
+    return db
+      .select()
+      .from(skillScans)
+      .where(and(eq(skillScans.createdBy, userId), eq(skillScans.status, "running")));
+  }
+
+  async failStaleRunningSkillScans(userId: string, olderThan: Date): Promise<void> {
+    await db
+      .update(skillScans)
+      .set({ status: "failed", error: "Scan timed out or was interrupted.", completedAt: new Date() })
+      .where(
+        and(
+          eq(skillScans.createdBy, userId),
+          eq(skillScans.status, "running"),
+          lte(skillScans.createdAt, olderThan),
+        ),
+      );
+  }
+
+  async updateSkillScan(id: string, data: Partial<SkillScan>): Promise<SkillScan | undefined> {
+    const [updated] = await db
+      .update(skillScans)
+      .set(data)
+      .where(eq(skillScans.id, id))
+      .returning();
+    return updated;
   }
 
   async seedData(): Promise<void> {
@@ -969,6 +1032,28 @@ export class DatabaseStorage implements IStorage {
         created_at TIMESTAMP DEFAULT NOW() NOT NULL
       );
     `).catch(() => { /* tables may already exist */ });
+
+    await pool
+      .query(
+        `CREATE TABLE IF NOT EXISTS skill_scans (
+          id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
+          created_by VARCHAR(36) NOT NULL,
+          created_by_name TEXT,
+          input_type TEXT NOT NULL,
+          target TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'running',
+          risk_score INTEGER,
+          risk_level TEXT,
+          recommendation TEXT,
+          summary JSONB,
+          findings JSONB,
+          raw_output JSONB,
+          error TEXT,
+          created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+          completed_at TIMESTAMP
+        );`,
+      )
+      .catch(() => {});
   }
 }
 
