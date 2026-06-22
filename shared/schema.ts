@@ -45,6 +45,16 @@ export type RunStatus = z.infer<typeof runStatusEnum>;
 export const runTriggerEnum = z.enum(["manual", "scheduled"]);
 export type RunTrigger = z.infer<typeof runTriggerEnum>;
 
+// --- Skill Inspector enums (z.enum + text columns; NOT pgEnum) ---
+export const skillScanStatusEnum = z.enum(["running", "complete", "failed"]);
+export type SkillScanStatus = z.infer<typeof skillScanStatusEnum>;
+
+export const skillScanInputTypeEnum = z.enum(["url", "upload"]);
+export type SkillScanInputType = z.infer<typeof skillScanInputTypeEnum>;
+
+export const skillScanRiskLevelEnum = z.enum(["low", "medium", "high", "critical", "unknown"]);
+export type SkillScanRiskLevel = z.infer<typeof skillScanRiskLevelEnum>;
+
 export const users = pgTable("users", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -284,6 +294,25 @@ export const workflowSteps = pgTable("workflow_steps", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// --- Skill Inspector table ---
+export const skillScans = pgTable("skill_scans", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  createdBy: varchar("created_by", { length: 36 }).notNull(),
+  createdByName: text("created_by_name"),
+  inputType: text("input_type").notNull(), // "url" | "upload"
+  target: text("target").notNull(),         // GitHub URL or uploaded filename
+  status: text("status").notNull().default("running"), // running | complete | failed
+  riskScore: integer("risk_score"),          // 0-100 (null until complete)
+  riskLevel: text("risk_level"),             // low|medium|high|critical|unknown
+  recommendation: text("recommendation"),
+  summary: jsonb("summary"),                  // { total: number, bySeverity: Record<string, number> }
+  findings: jsonb("findings"),                // ParsedFinding[]
+  rawOutput: jsonb("raw_output"),             // full SkillSpector JSON (for export)
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
 export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({ id: true, createdAt: true });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
@@ -310,6 +339,10 @@ export const insertRequestAttachmentSchema = createInsertSchema(requestAttachmen
 export const insertPlatformStakeholderSchema = createInsertSchema(platformStakeholders).omit({ id: true, createdAt: true });
 export const insertExpirationAlertSchema = createInsertSchema(expirationAlerts).omit({ id: true, createdAt: true });
 export const insertPlatformAttachmentSchema = createInsertSchema(platformAttachments).omit({ id: true, createdAt: true });
+export const insertSkillScanSchema = createInsertSchema(skillScans).omit({
+  id: true,
+  createdAt: true,
+});
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -346,6 +379,8 @@ export type PlatformAttachment = typeof platformAttachments.$inferSelect;
 export type InsertPlatformAttachment = z.infer<typeof insertPlatformAttachmentSchema>;
 export type WorkflowStep = typeof workflowSteps.$inferSelect;
 export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
+export type SkillScan = typeof skillScans.$inferSelect;
+export type InsertSkillScan = z.infer<typeof insertSkillScanSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API Command Center
