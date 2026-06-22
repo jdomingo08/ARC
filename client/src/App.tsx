@@ -23,6 +23,7 @@ import RiskAgentPage from "@/pages/risk-agent";
 import AgentModulesPage from "@/pages/agent-modules";
 import ApiCommandCenterPage from "@/pages/api-command-center";
 import VendorFormPage from "@/pages/vendor-form";
+import SkillInspectorPage from "@/pages/skill-inspector";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {
@@ -78,6 +79,7 @@ function AppContent() {
                 <Route path="/risk" component={RiskAgentPage} />
                 <Route path="/agents" component={AgentModulesPage} />
                 <Route path="/integrations" component={ApiCommandCenterPage} />
+                <Route path="/skill-inspector" component={SkillInspectorPage} />
                 <Route component={NotFound} />
               </Switch>
             </ErrorBoundary>
