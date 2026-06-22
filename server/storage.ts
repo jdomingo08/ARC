@@ -137,6 +137,7 @@ export interface IStorage {
   getSkillScansByUser(userId: string): Promise<SkillScan[]>;
   getAllSkillScans(): Promise<SkillScan[]>;
   getRunningSkillScansByUser(userId: string): Promise<SkillScan[]>;
+  failStaleRunningSkillScans(userId: string, olderThan: Date): Promise<void>;
   updateSkillScan(id: string, data: Partial<SkillScan>): Promise<SkillScan | undefined>;
 
   seedData(): Promise<void>;
@@ -521,6 +522,19 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(skillScans)
       .where(and(eq(skillScans.createdBy, userId), eq(skillScans.status, "running")));
+  }
+
+  async failStaleRunningSkillScans(userId: string, olderThan: Date): Promise<void> {
+    await db
+      .update(skillScans)
+      .set({ status: "failed", error: "Scan timed out or was interrupted.", completedAt: new Date() })
+      .where(
+        and(
+          eq(skillScans.createdBy, userId),
+          eq(skillScans.status, "running"),
+          lte(skillScans.createdAt, olderThan),
+        ),
+      );
   }
 
   async updateSkillScan(id: string, data: Partial<SkillScan>): Promise<SkillScan | undefined> {

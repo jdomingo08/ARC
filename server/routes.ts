@@ -1972,6 +1972,9 @@ export async function registerRoutes(
           fileName = file.originalname;
         }
 
+        // Self-heal: fail any scan stuck "running" longer than the max scan duration (orphaned by an instance teardown).
+        await storage.failStaleRunningSkillScans(user.id, new Date(Date.now() - 6 * 60 * 1000));
+
         // One running scan per user (prevents double-submit / runaway).
         const running = await storage.getRunningSkillScansByUser(user.id);
         if (running.length > 0) {
