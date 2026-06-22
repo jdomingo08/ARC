@@ -51,7 +51,8 @@ export class SkillInspector extends EventEmitter {
         if (!opts.fileBuffer || !opts.fileName) {
           throw new Error("Upload is missing file data.");
         }
-        const filePath = path.join(workDir, opts.fileName);
+        const safeName = path.basename(opts.fileName);
+        const filePath = path.join(workDir, safeName);
         await writeFile(filePath, opts.fileBuffer);
         scanTarget = filePath;
       }
@@ -78,13 +79,19 @@ export class SkillInspector extends EventEmitter {
       return updated as SkillScan;
     } catch (err: any) {
       const message = this.aborted ? "Scan cancelled." : err?.message || "Scan failed.";
-      const updated = await this.storage.updateSkillScan(opts.scanId, {
-        status: "failed",
-        error: message,
-        completedAt: new Date(),
-      });
-      this.emit("error", { message });
-      return updated as SkillScan;
+      try {
+        const updated = await this.storage.updateSkillScan(opts.scanId, {
+          status: "failed",
+          error: message,
+          completedAt: new Date(),
+        });
+        this.emit("error", { message });
+        return updated as SkillScan;
+      } catch (persistErr: any) {
+        console.error("[SkillInspector] failed to persist failure for scan", opts.scanId, persistErr);
+        this.emit("error", { message });
+        return { id: opts.scanId, status: "failed", error: message } as SkillScan;
+      }
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }

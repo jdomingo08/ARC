@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import path from "path";
 import { skillSpectorAvailable } from "../skillspector-cli";
 import { SkillInspector } from "../inspector";
