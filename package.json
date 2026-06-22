@@ -8,7 +8,8 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "setup:python": "python3.12 -m venv .venv && .venv/bin/pip install --no-cache-dir \"git+https://github.com/NVIDIA/SkillSpector.git@26d1a9aecd27c8646298f9b2c0b85b0e5736b62b\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
