@@ -177,6 +177,8 @@ export class OpenAIUsageClient {
       if (!day) {
         day = {
           usageDate: key,
+          units: 0,
+          unitLabel: "tokens",
           inputTokens: 0,
           outputTokens: 0,
           cachedInputTokens: 0,
@@ -215,8 +217,9 @@ export class OpenAIUsageClient {
           existing.inputTokens += input;
           existing.outputTokens += output;
           existing.numRequests += requests;
+          existing.units += input + output;
         } else {
-          day.byModel.push({ model, inputTokens: input, outputTokens: output, numRequests: requests });
+          day.byModel.push({ model, units: input + output, inputTokens: input, outputTokens: output, numRequests: requests });
         }
       }
     }
@@ -251,8 +254,9 @@ export class OpenAIUsageClient {
 
     // Round costs to cents-ish precision to avoid float noise in the UI.
     for (const day of Array.from(days.values())) {
+      day.units = day.totalTokens; // primary usage metric for OpenAI = total tokens
       day.costUsd = Math.round(day.costUsd * 10000) / 10000;
-      day.byModel.sort((a, b) => b.outputTokens + b.inputTokens - (a.outputTokens + a.inputTokens));
+      day.byModel.sort((a, b) => b.units - a.units);
       day.byLineItem.forEach((l) => (l.costUsd = Math.round(l.costUsd * 10000) / 10000));
       day.byLineItem.sort((a, b) => b.costUsd - a.costUsd);
     }

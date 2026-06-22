@@ -1033,6 +1033,12 @@ export class DatabaseStorage implements IStorage {
       );
     `).catch(() => { /* tables may already exist */ });
 
+    // Generic usage-unit columns for multi-provider support (added after OpenAI launch)
+    await pool.query(`
+      ALTER TABLE api_usage_snapshots ADD COLUMN IF NOT EXISTS units INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE api_usage_snapshots ADD COLUMN IF NOT EXISTS unit_label TEXT NOT NULL DEFAULT 'tokens';
+    `).catch(() => { /* columns may already exist */ });
+
     await pool
       .query(
         `CREATE TABLE IF NOT EXISTS skill_scans (

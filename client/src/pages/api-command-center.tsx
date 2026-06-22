@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -20,7 +21,6 @@ import {
   Save,
   Loader2,
   WifiOff,
-  Wifi,
   Clock,
   CheckCircle2,
   XCircle,
@@ -35,25 +35,54 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  Legend,
 } from "recharts";
 import type { ApiUsageSnapshot, ApiSyncLog, ApiUsageSchedule } from "@shared/schema";
 
-interface UsageSummary {
-  provider: string;
-  windowDays: number;
-  snapshots: ApiUsageSnapshot[];
-  totals: { costUsd: number; inputTokens: number; outputTokens: number; totalTokens: number; numRequests: number };
-  byModel: Array<{ model: string; inputTokens: number; outputTokens: number; numRequests: number }>;
-  yesterday: ApiUsageSnapshot | null;
-  today: ApiUsageSnapshot | null;
+interface ProviderInfo {
+  key: string;
+  label: string;
+  hasCost: boolean;
+  hasRequests: boolean;
+  supportsQuota: boolean;
+  unitLabel: string;
+  configured: boolean;
 }
 
-interface OpenAIStatus {
+interface ProviderStatus {
   provider: string;
-  adminKeyConfigured: boolean;
+  label: string;
+  hasCost: boolean;
+  hasRequests: boolean;
+  supportsQuota: boolean;
+  unitLabel: string;
+  envVar: string;
+  configured: boolean;
   slackConfigured: boolean;
   latestSnapshotDate: string | null;
+}
+
+interface Quota {
+  tier?: string | null;
+  used: number;
+  limit: number | null;
+  unitLabel: string;
+  resetAt?: string | null;
+}
+
+interface UsageSummary {
+  provider: string;
+  label: string;
+  hasCost: boolean;
+  hasRequests: boolean;
+  supportsQuota: boolean;
+  unitLabel: string;
+  windowDays: number;
+  snapshots: ApiUsageSnapshot[];
+  totals: { costUsd: number; units: number; inputTokens: number; outputTokens: number; totalTokens: number; numRequests: number };
+  byModel: Array<{ model: string; units: number; inputTokens: number; outputTokens: number; numRequests: number }>;
+  quota: Quota | null;
+  yesterday: ApiUsageSnapshot | null;
+  today: ApiUsageSnapshot | null;
 }
 
 const FREQUENCY_PRESETS: { label: string; cron: string }[] = [
@@ -63,18 +92,18 @@ const FREQUENCY_PRESETS: { label: string; cron: string }[] = [
   { label: "Every 6 hours", cron: "0 */6 * * *" },
 ];
 
-const usd = (n: number) =>
-  `$${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const KEY_HINTS: Record<string, string> = {
+  openai: "an Organization Admin key (sk-admin-…), separate from the inference key used by the Risk Agent",
+  elevenlabs: "your ElevenLabs API key (ElevenLabs dashboard → Profile → API key)",
+};
+
+const usd = (n: number) => `$${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const num = (n: number) => (n || 0).toLocaleString("en-US");
 const compact = (n: number) => Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n || 0);
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 function formatDateTime(date: string | Date) {
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export default function ApiCommandCenterPage() {
@@ -82,28 +111,30 @@ export default function ApiCommandCenterPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
+  const [provider, setProvider] = useState("openai");
   const [windowDays, setWindowDays] = useState("30");
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  // Schedule local state
+  // Schedule local state (module-wide)
   const [scheduleEnabled, setScheduleEnabled] = useState<boolean | null>(null);
   const [scheduleCron, setScheduleCron] = useState<string>("");
   const [slackDigest, setSlackDigest] = useState<boolean | null>(null);
   const [scheduleModified, setScheduleModified] = useState(false);
 
-  const { data: status } = useQuery<OpenAIStatus>({ queryKey: ["/api/integrations/openai/status"] });
+  const { data: providers } = useQuery<ProviderInfo[]>({ queryKey: ["/api/integrations/providers"] });
+  const { data: status } = useQuery<ProviderStatus>({ queryKey: ["/api/integrations", provider, "status"] });
 
   const { data: summary, isLoading: summaryLoading } = useQuery<UsageSummary>({
-    queryKey: ["/api/integrations/openai/summary", windowDays],
+    queryKey: ["/api/integrations", provider, "summary", windowDays],
     queryFn: async () => {
-      const res = await fetch(`/api/integrations/openai/summary?days=${windowDays}`, { credentials: "include" });
+      const res = await fetch(`/api/integrations/${provider}/summary?days=${windowDays}`, { credentials: "include" });
       if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       return res.json();
     },
   });
 
   const { data: logs, isLoading: logsLoading } = useQuery<ApiSyncLog[]>({
-    queryKey: ["/api/integrations/openai/logs"],
+    queryKey: ["/api/integrations", provider, "logs"],
   });
 
   const { data: schedule } = useQuery<ApiUsageSchedule>({
@@ -120,14 +151,12 @@ export default function ApiCommandCenterPage() {
 
   const syncMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/integrations/openai/sync", { days: Number(windowDays) });
+      const res = await apiRequest("POST", `/api/integrations/${provider}/sync`, { days: Number(windowDays) });
       return res.json();
     },
     onSuccess: (data: { summary: string }) => {
       toast({ title: "Sync complete", description: data.summary });
-      queryClient.invalidateQueries({ queryKey: ["/api/integrations/openai/summary"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/integrations/openai/status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/integrations/openai/logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations", provider] });
     },
     onError: (error: Error) => {
       toast({ title: "Sync failed", description: error.message, variant: "destructive" });
@@ -136,7 +165,7 @@ export default function ApiCommandCenterPage() {
 
   const testMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/integrations/openai/test");
+      const res = await apiRequest("POST", `/api/integrations/${provider}/test`);
       return res.json() as Promise<{ ok: boolean; message: string; status?: number }>;
     },
     onSuccess: (data) => {
@@ -146,7 +175,7 @@ export default function ApiCommandCenterPage() {
         description: data.message,
         variant: data.ok ? undefined : "destructive",
       });
-      if (data.ok) queryClient.invalidateQueries({ queryKey: ["/api/integrations/openai/status"] });
+      if (data.ok) queryClient.invalidateQueries({ queryKey: ["/api/integrations", provider, "status"] });
     },
     onError: (error: Error) => {
       setTestResult({ ok: false, message: error.message });
@@ -173,41 +202,49 @@ export default function ApiCommandCenterPage() {
     },
   });
 
+  const hasCost = summary?.hasCost ?? status?.hasCost ?? false;
+  const hasRequests = summary?.hasRequests ?? status?.hasRequests ?? false;
+  const supportsQuota = summary?.supportsQuota ?? status?.supportsQuota ?? false;
+  const unitLabel = summary?.unitLabel || status?.unitLabel || "units";
+  const anyConfigured = providers?.some((p) => p.configured) ?? false;
+
   const chartData =
     summary?.snapshots.map((s) => ({
-      date: s.usageDate.slice(5), // MM-DD
+      date: s.usageDate.slice(5),
       cost: Number(s.costUsd),
-      input: s.inputTokens,
-      output: s.outputTokens,
-      requests: s.numRequests,
+      units: s.units,
     })) || [];
 
-  const statCards = [
-    {
-      title: "Yesterday's spend",
-      value: usd(Number(summary?.yesterday?.costUsd ?? 0)),
-      description: summary?.yesterday ? summary.yesterday.usageDate : "No data yet",
-      icon: DollarSign,
-    },
-    {
-      title: `Spend (${windowDays}d)`,
-      value: usd(summary?.totals.costUsd ?? 0),
-      description: "Total across the window",
-      icon: DollarSign,
-    },
-    {
-      title: `Tokens (${windowDays}d)`,
-      value: compact(summary?.totals.totalTokens ?? 0),
-      description: `${compact(summary?.totals.inputTokens ?? 0)} in / ${compact(summary?.totals.outputTokens ?? 0)} out`,
-      icon: Coins,
-    },
-    {
-      title: `Requests (${windowDays}d)`,
-      value: compact(summary?.totals.numRequests ?? 0),
-      description: "Model API calls",
-      icon: Activity,
-    },
-  ];
+  const yd = summary?.yesterday;
+  const quota = summary?.quota;
+
+  const statCards: { title: string; value: React.ReactNode; desc: string; icon: any }[] = [];
+  if (hasCost) {
+    statCards.push({ title: "Yesterday's spend", value: usd(Number(yd?.costUsd ?? 0)), desc: yd ? yd.usageDate : "No data yet", icon: DollarSign });
+    statCards.push({ title: `Spend (${windowDays}d)`, value: usd(summary?.totals.costUsd ?? 0), desc: "Window total", icon: DollarSign });
+    statCards.push({ title: `${cap(unitLabel)} (${windowDays}d)`, value: compact(summary?.totals.units ?? 0), desc: `Yesterday: ${compact(Number(yd?.units ?? 0))}`, icon: Coins });
+    if (hasRequests) statCards.push({ title: `Requests (${windowDays}d)`, value: compact(summary?.totals.numRequests ?? 0), desc: "Model API calls", icon: Activity });
+  } else {
+    statCards.push({ title: `Yesterday's ${unitLabel}`, value: compact(Number(yd?.units ?? 0)), desc: yd ? yd.usageDate : "No data yet", icon: Coins });
+    statCards.push({ title: `${cap(unitLabel)} (${windowDays}d)`, value: compact(summary?.totals.units ?? 0), desc: "Window total", icon: Coins });
+    if (supportsQuota && quota) {
+      const pct = quota.limit ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : null;
+      statCards.push({
+        title: "Plan usage",
+        value: pct != null ? `${pct}%` : compact(quota.used),
+        desc: `${compact(quota.used)}${quota.limit ? ` / ${compact(quota.limit)}` : ""} ${unitLabel}`,
+        icon: Gauge,
+      });
+      statCards.push({
+        title: "Plan resets",
+        value: quota.resetAt ? new Date(quota.resetAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—",
+        desc: quota.tier ? `Tier: ${quota.tier}` : "Current billing cycle",
+        icon: CalendarClock,
+      });
+    }
+  }
+
+  const quotaPct = quota && quota.limit ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : null;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -217,9 +254,7 @@ export default function ApiCommandCenterPage() {
             <Gauge className="h-6 w-6" />
             API Command Center
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Central monitoring for the third-party APIs we consume. Showing OpenAI organization usage &amp; spend.
-          </p>
+          <p className="text-muted-foreground mt-1">Central monitoring for the third-party APIs we consume.</p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={windowDays} onValueChange={setWindowDays}>
@@ -233,12 +268,7 @@ export default function ApiCommandCenterPage() {
             </SelectContent>
           </Select>
           {isAdmin && (
-            <Button
-              variant="outline"
-              onClick={() => testMutation.mutate()}
-              disabled={testMutation.isPending}
-              data-testid="button-acc-test"
-            >
+            <Button variant="outline" onClick={() => testMutation.mutate()} disabled={testMutation.isPending} data-testid="button-acc-test">
               {testMutation.isPending ? (
                 <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Testing…</>
               ) : (
@@ -247,11 +277,7 @@ export default function ApiCommandCenterPage() {
             </Button>
           )}
           {isAdmin && (
-            <Button
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending || !status?.adminKeyConfigured}
-              data-testid="button-acc-sync"
-            >
+            <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending || !status?.configured} data-testid="button-acc-sync">
               {syncMutation.isPending ? (
                 <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Syncing…</>
               ) : (
@@ -262,12 +288,26 @@ export default function ApiCommandCenterPage() {
         </div>
       </div>
 
-      {/* Provider tabs (OpenAI today; extensible to more providers) */}
-      <div className="flex items-center gap-2">
-        <Badge variant="secondary" className="gap-1">
-          <Wifi className="h-3 w-3" /> OpenAI
-        </Badge>
-        <Badge variant="outline" className="text-muted-foreground">More providers coming soon</Badge>
+      {/* Provider switcher */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(providers || [{ key: "openai", label: "OpenAI", configured: false } as ProviderInfo]).map((p) => (
+          <Button
+            key={p.key}
+            variant={provider === p.key ? "default" : "outline"}
+            size="sm"
+            onClick={() => {
+              setProvider(p.key);
+              setTestResult(null);
+            }}
+            data-testid={`provider-${p.key}`}
+          >
+            {p.label}
+            <span
+              className={`ml-2 h-2 w-2 rounded-full ${p.configured ? "bg-green-500" : "bg-muted-foreground/40"}`}
+              title={p.configured ? "Configured" : "Not configured"}
+            />
+          </Button>
+        ))}
       </div>
 
       {/* Test connection result */}
@@ -280,26 +320,21 @@ export default function ApiCommandCenterPage() {
           }`}
           data-testid="acc-test-result"
         >
-          {testResult.ok ? (
-            <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
-          ) : (
-            <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          )}
+          {testResult.ok ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" /> : <XCircle className="h-4 w-4 mt-0.5 shrink-0" />}
           <span>{testResult.message}</span>
         </div>
       )}
 
       {/* Not-configured banner */}
-      {status && !status.adminKeyConfigured && (
+      {status && !status.configured && (
         <Card className="border-amber-500/50 bg-amber-500/5">
           <CardContent className="p-4 flex items-start gap-3">
             <WifiOff className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium">OpenAI Admin key not configured</p>
+              <p className="text-sm font-medium">{status.label} not configured</p>
               <p className="text-xs text-muted-foreground">
-                Set the <code className="px-1 py-0.5 bg-muted rounded text-[11px]">OPENAI_ADMIN_KEY</code> environment
-                variable to an Organization Admin key (<code className="px-1 py-0.5 bg-muted rounded text-[11px]">sk-admin-…</code>)
-                to pull org-wide usage and spend. This is separate from the inference key used by the Risk Agent.
+                Set the <code className="px-1 py-0.5 bg-muted rounded text-[11px]">{status.envVar}</code> environment variable to{" "}
+                {KEY_HINTS[status.provider] || `enable ${status.label} usage data`}.
               </p>
             </div>
           </CardContent>
@@ -317,7 +352,7 @@ export default function ApiCommandCenterPage() {
                   <p className="text-3xl font-bold mt-1 truncate" data-testid={`stat-${stat.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
                     {summaryLoading ? <Skeleton className="h-8 w-24" /> : stat.value}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{stat.description}</p>
+                  <p className="text-xs text-muted-foreground mt-1 truncate">{stat.desc}</p>
                 </div>
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-muted shrink-0">
                   <stat.icon className="h-5 w-5 text-muted-foreground" />
@@ -328,48 +363,64 @@ export default function ApiCommandCenterPage() {
         ))}
       </div>
 
+      {/* Plan quota progress (providers with a quota) */}
+      {supportsQuota && quota && quotaPct != null && (
+        <Card>
+          <CardContent className="p-4 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">Plan usage this cycle</span>
+              <span className="text-muted-foreground">
+                {num(quota.used)} / {num(quota.limit || 0)} {unitLabel} ({quotaPct}%)
+              </span>
+            </div>
+            <Progress value={quotaPct} className="h-2" />
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="charts">
         <TabsList>
-          <TabsTrigger value="charts" data-testid="tab-acc-charts">Usage &amp; Spend</TabsTrigger>
+          <TabsTrigger value="charts" data-testid="tab-acc-charts">Usage{hasCost ? " & Spend" : ""}</TabsTrigger>
           <TabsTrigger value="models" data-testid="tab-acc-models">By Model</TabsTrigger>
           <TabsTrigger value="logs" data-testid="tab-acc-logs">
             <Clock className="h-4 w-4 mr-1" /> Sync Logs ({logs?.length || 0})
           </TabsTrigger>
         </TabsList>
 
-        {/* Charts */}
         <TabsContent value="charts" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Daily spend (USD)</CardTitle>
-              <CardDescription>Cost per day over the selected window</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summaryLoading ? (
-                <Skeleton className="h-64 w-full" />
-              ) : chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `$${v}`} />
-                    <RechartsTooltip
-                      formatter={(value: any) => [usd(Number(value)), "Cost"]}
-                      contentStyle={{ background: "hsl(var(--popover, 0 0% 100%))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                    />
-                    <Bar dataKey="cost" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState />
-              )}
-            </CardContent>
-          </Card>
+          {hasCost && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Daily spend (USD)</CardTitle>
+                <CardDescription>Cost per day over the selected window</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {summaryLoading ? (
+                  <Skeleton className="h-64 w-full" />
+                ) : chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                      <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `$${v}`} />
+                      <RechartsTooltip
+                        formatter={(value: any) => [usd(Number(value)), "Cost"]}
+                        contentStyle={{ background: "hsl(var(--popover, 0 0% 100%))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                      />
+                      <Bar dataKey="cost" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState configured={status?.configured} />
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Token usage</CardTitle>
-              <CardDescription>Input vs. output tokens per day</CardDescription>
+              <CardTitle className="text-base">Daily {unitLabel}</CardTitle>
+              <CardDescription>{cap(unitLabel)} consumed per day</CardDescription>
             </CardHeader>
             <CardContent>
               {summaryLoading ? (
@@ -381,26 +432,23 @@ export default function ApiCommandCenterPage() {
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
                     <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => compact(Number(v))} />
                     <RechartsTooltip
-                      formatter={(value: any, name: any) => [num(Number(value)), name === "input" ? "Input" : "Output"]}
+                      formatter={(value: any) => [num(Number(value)), cap(unitLabel)]}
                       contentStyle={{ background: "hsl(var(--popover, 0 0% 100%))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                     />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="input" stackId="t" fill="hsl(var(--chart-1))" name="Input" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="output" stackId="t" fill="hsl(var(--chart-2))" name="Output" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="units" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <EmptyState />
+                <EmptyState configured={status?.configured} />
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* By model */}
         <TabsContent value="models" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Token usage by model</CardTitle>
+              <CardTitle className="text-base">{cap(unitLabel)} by model</CardTitle>
               <CardDescription>Aggregated across the selected window</CardDescription>
             </CardHeader>
             <CardContent>
@@ -409,34 +457,30 @@ export default function ApiCommandCenterPage() {
               ) : summary && summary.byModel.length > 0 ? (
                 <div className="space-y-2">
                   {summary.byModel.map((m) => {
-                    const total = m.inputTokens + m.outputTokens;
-                    const max = summary.byModel[0].inputTokens + summary.byModel[0].outputTokens || 1;
+                    const max = summary.byModel[0].units || 1;
                     return (
                       <div key={m.model} className="space-y-1" data-testid={`model-row-${m.model}`}>
                         <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium font-mono">{m.model}</span>
-                          <span className="text-muted-foreground">
-                            {num(total)} tokens · {num(m.numRequests)} reqs
+                          <span className="font-medium font-mono truncate">{m.model}</span>
+                          <span className="text-muted-foreground shrink-0 ml-2">
+                            {num(m.units)} {unitLabel}
+                            {hasRequests ? ` · ${num(m.numRequests)} reqs` : ""}
                           </span>
                         </div>
                         <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-primary"
-                            style={{ width: `${Math.max(2, Math.round((total / max) * 100))}%` }}
-                          />
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(2, Math.round((m.units / max) * 100))}%` }} />
                         </div>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <EmptyState />
+                <EmptyState configured={status?.configured} />
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Sync logs */}
         <TabsContent value="logs" className="mt-4 space-y-3">
           {logsLoading ? (
             <Skeleton className="h-48 w-full" />
@@ -460,11 +504,6 @@ export default function ApiCommandCenterPage() {
                         {log.trigger === "scheduled" ? <Clock className="h-3 w-3 mr-1" /> : null}
                         {log.trigger}
                       </Badge>
-                      {log.slackDigestSent && (
-                        <Badge variant="secondary" className="text-xs gap-1">
-                          <MessageSquare className="h-3 w-3" /> Slack
-                        </Badge>
-                      )}
                       <span className="text-xs text-muted-foreground">{formatDateTime(log.createdAt)}</span>
                     </div>
                   </div>
@@ -488,7 +527,7 @@ export default function ApiCommandCenterPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Schedule management (admin only) */}
+      {/* Schedule management (admin only, module-wide) */}
       {isAdmin && (
         <Card>
           <CardHeader>
@@ -497,14 +536,14 @@ export default function ApiCommandCenterPage() {
               Daily sync &amp; morning digest
             </CardTitle>
             <CardDescription>
-              Automatically pulls the previous day's usage every morning so the dashboard is fresh when you arrive.
+              One schedule pulls usage for every configured provider each morning, so the dashboard is fresh when you arrive.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">Enable daily sync</p>
-                <p className="text-xs text-muted-foreground">Runs on the schedule below and refreshes recent days.</p>
+                <p className="text-xs text-muted-foreground">Syncs all configured providers on the schedule below.</p>
               </div>
               <Switch
                 checked={scheduleEnabled ?? false}
@@ -512,7 +551,7 @@ export default function ApiCommandCenterPage() {
                   setScheduleEnabled(c);
                   setScheduleModified(true);
                 }}
-                disabled={!status?.adminKeyConfigured}
+                disabled={!anyConfigured}
                 data-testid="switch-acc-enabled"
               />
             </div>
@@ -549,7 +588,7 @@ export default function ApiCommandCenterPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {status?.slackConfigured
-                        ? "Posts a usage summary to Slack after each scheduled sync."
+                        ? "Posts one combined usage summary (all providers) to Slack after each scheduled sync."
                         : "Set SLACK_WEBHOOK_URL (or SLACK_BOT_TOKEN + SLACK_USAGE_CHANNEL) to enable."}
                     </p>
                   </div>
@@ -574,12 +613,7 @@ export default function ApiCommandCenterPage() {
             )}
 
             {scheduleModified && (
-              <Button
-                size="sm"
-                onClick={() => saveScheduleMutation.mutate()}
-                disabled={saveScheduleMutation.isPending}
-                data-testid="button-acc-save-schedule"
-              >
+              <Button size="sm" onClick={() => saveScheduleMutation.mutate()} disabled={saveScheduleMutation.isPending} data-testid="button-acc-save-schedule">
                 {saveScheduleMutation.isPending ? (
                   <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Saving…</>
                 ) : (
@@ -594,13 +628,13 @@ export default function ApiCommandCenterPage() {
   );
 }
 
-function EmptyState() {
+function EmptyState({ configured }: { configured?: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
       <Gauge className="h-10 w-10 text-muted-foreground mb-3 opacity-50" />
       <p className="text-muted-foreground">No usage data yet</p>
       <p className="text-sm text-muted-foreground mt-1">
-        Once the OpenAI Admin key is set, run a sync to populate the dashboard.
+        {configured ? "Run a sync to populate the dashboard." : "Add this provider's API key, then run a sync."}
       </p>
     </div>
   );

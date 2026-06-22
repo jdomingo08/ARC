@@ -1,14 +1,13 @@
 /**
  * Slack notifier for the API Command Center morning digest.
  *
- * This runs inside the deployed server (not via any IDE/assistant tooling), so
- * it posts to Slack using the app's own credentials. Two options are supported,
+ * Runs inside the deployed server, so it posts using the app's own credentials,
  * checked in this order:
+ *   1. SLACK_BOT_TOKEN + SLACK_USAGE_CHANNEL  → chat.postMessage
+ *   2. SLACK_WEBHOOK_URL                       → Incoming Webhook
  *
- *   1. SLACK_BOT_TOKEN + SLACK_USAGE_CHANNEL  → chat.postMessage (richer, can target a channel)
- *   2. SLACK_WEBHOOK_URL                       → Incoming Webhook (simplest)
- *
- * When neither is configured the digest is skipped gracefully.
+ * The scheduler composes one combined message covering every provider; this
+ * module builds each provider's section and handles delivery.
  */
 
 import type { ApiUsageSnapshot } from "@shared/schema";
@@ -20,38 +19,41 @@ export function isSlackConfigured(): boolean {
 }
 
 function fmtUsd(value: number): string {
-  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `$${(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtNum(value: number): string {
-  return value.toLocaleString("en-US");
+  return (value || 0).toLocaleString("en-US");
 }
 
-interface DigestInput {
-  /** The headline day (usually yesterday). */
+function capitalize(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+export interface ProviderDigestInput {
+  label: string;
   day: ApiUsageSnapshot;
-  /** Rolling 30-day spend total, for context. */
-  thirtyDayCostUsd: number;
-  dashboardUrl?: string;
+  hasCost: boolean;
+  rolling30Cost: number;
+  rolling30Units: number;
 }
 
-/** Build the human-readable digest text shared by both delivery paths. */
-export function buildDigestText({ day, thirtyDayCostUsd, dashboardUrl }: DigestInput): string {
-  const cost = Number(day.costUsd);
-  const topModels = (day.byModel as Array<{ model: string; inputTokens: number; outputTokens: number }> | null) || [];
-  const modelLine = topModels
-    .slice(0, 3)
-    .map((m) => `${m.model} (${fmtNum(m.inputTokens + m.outputTokens)} tok)`)
-    .join(", ");
+/** Build one provider's section of the digest. */
+export function buildProviderSection({ label, day, hasCost, rolling30Cost, rolling30Units }: ProviderDigestInput): string {
+  const lines = [`*${label} — ${day.usageDate}*`];
+  if (hasCost) {
+    lines.push(`• Spend: *${fmtUsd(Number(day.costUsd))}*  (30-day: ${fmtUsd(rolling30Cost)})`);
+  }
+  lines.push(`• ${capitalize(day.unitLabel)}: ${fmtNum(day.units)}  (30-day: ${fmtNum(rolling30Units)})`);
+  if (day.numRequests) lines.push(`• Requests: ${fmtNum(day.numRequests)}`);
 
-  const lines = [
-    `*OpenAI usage — ${day.usageDate}*`,
-    `• Spend: *${fmtUsd(cost)}*  (30-day: ${fmtUsd(thirtyDayCostUsd)})`,
-    `• Tokens: ${fmtNum(day.totalTokens)} (${fmtNum(day.inputTokens)} in / ${fmtNum(day.outputTokens)} out)`,
-    `• Requests: ${fmtNum(day.numRequests)}`,
-  ];
-  if (modelLine) lines.push(`• Top models: ${modelLine}`);
-  if (dashboardUrl) lines.push(`<${dashboardUrl}|Open the API Command Center →>`);
+  const top = (day.byModel as Array<{ model: string; units: number }> | null) || [];
+  const modelLine = top
+    .slice(0, 3)
+    .map((m) => `${m.model} (${fmtNum(m.units)})`)
+    .join(", ");
+  if (modelLine) lines.push(`• Top: ${modelLine}`);
+
   return lines.join("\n");
 }
 
@@ -60,16 +62,11 @@ export interface SlackSendResult {
   reason?: string;
 }
 
-/**
- * Post the morning digest to Slack. Never throws — returns a result describing
- * what happened so callers can record it without failing the sync.
- */
-export async function postSlackUsageDigest(input: DigestInput): Promise<SlackSendResult> {
+/** Post a message to Slack. Never throws — returns a result describing the outcome. */
+export async function postSlackMessage(text: string): Promise<SlackSendResult> {
   if (!isSlackConfigured()) {
     return { sent: false, reason: "not_configured" };
   }
-
-  const text = buildDigestText(input);
 
   try {
     const botToken = process.env.SLACK_BOT_TOKEN;
