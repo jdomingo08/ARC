@@ -74,4 +74,18 @@ describe("step machine", () => {
     const s = deriveSteps(new Set(["resolve_input"]));
     expect(summarizeSteps(s)).toEqual({ current: "build_context", doneCount: 1, totalCount: 25 });
   });
+
+  it("failure mid-analyzer stage: completed analyzers stay done, the rest fail, later stays pending", () => {
+    const done = new Set(["resolve_input", "build_context", "static_yara", "mcp_rug_pull"]);
+    const s = deriveSteps(done, true);
+    expect(status(s, "static_yara")).toBe("done");
+    expect(status(s, "mcp_rug_pull")).toBe("done");
+    expect(status(s, "static_patterns_prompt_injection")).toBe("failed");
+    expect(status(s, "meta_analyzer")).toBe("pending");
+  });
+
+  it("summarizeSteps on a failed stage: no running step so current is null", () => {
+    const s = deriveSteps(new Set(["resolve_input"]), true);
+    expect(summarizeSteps(s).current).toBeNull();
+  });
 });
