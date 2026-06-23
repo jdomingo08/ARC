@@ -50,10 +50,11 @@ export class SkillInspector extends EventEmitter {
       if (!force && now - lastPersist < PERSIST_THROTTLE_MS) return;
       lastPersist = now;
       const { current } = summarizeSteps(steps);
-      await this.storage.updateSkillScan(opts.scanId, {
-        steps: steps as any,
-        currentStep: current,
-      });
+      try {
+        await this.storage.updateSkillScan(opts.scanId, { steps: steps as any, currentStep: current });
+      } catch (e) {
+        console.error("[SkillInspector] step persist failed for scan", opts.scanId, e);
+      }
     };
 
     try {
@@ -93,13 +94,14 @@ export class SkillInspector extends EventEmitter {
         currentStep: null,
         completedAt: new Date(),
       });
-      this.emit("step", { steps: finalSteps, current: null, doneCount: 25, totalCount: 25 });
+      this.emit("step", { steps: finalSteps, current: null, doneCount: finalSteps.length, totalCount: finalSteps.length });
       this.emit("complete", { scan: updated });
       return updated as SkillScan;
     } catch (err: any) {
       const message = this.aborted ? "Scan cancelled." : err?.message || "Scan failed.";
-      const failedSteps = stepStateNow(true);
-      const failedNode = summarizeSteps(deriveSteps(done)).current;
+      const runningSteps = deriveSteps(done);
+      const failedNode = summarizeSteps(runningSteps).current;
+      const failedSteps = deriveSteps(done, true);
       try {
         const updated = await this.storage.updateSkillScan(opts.scanId, {
           status: "failed",
@@ -159,7 +161,7 @@ export class SkillInspector extends EventEmitter {
           if (errorMsg) return reject(new Error(errorMsg));
           if (report == null) return reject(new Error("Scanner produced no result."));
           resolve(report);
-        });
+        }, reject);
       };
 
       child.stdout.on("data", (b) => {
