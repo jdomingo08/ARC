@@ -309,6 +309,8 @@ export const skillScans = pgTable("skill_scans", {
   findings: jsonb("findings"),                // ParsedFinding[]
   rawOutput: jsonb("raw_output"),             // full SkillSpector JSON (for export)
   error: text("error"),
+  steps: jsonb("steps"),
+  currentStep: text("current_step"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
 });

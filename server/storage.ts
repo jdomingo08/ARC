@@ -1060,6 +1060,12 @@ export class DatabaseStorage implements IStorage {
         );`,
       )
       .catch(() => {});
+    await pool
+      .query(`ALTER TABLE skill_scans ADD COLUMN IF NOT EXISTS steps JSONB;`)
+      .catch(() => {});
+    await pool
+      .query(`ALTER TABLE skill_scans ADD COLUMN IF NOT EXISTS current_step TEXT;`)
+      .catch(() => {});
   }
 }
 
