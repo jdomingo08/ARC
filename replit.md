@@ -89,6 +89,7 @@ Wraps NVIDIA SkillSpector (Python 3.12), installed into a `.venv` baked into the
 
 - `OPENAI_API_KEY` — reused from the main AI config; passed to SkillSpector for its LLM analysis stage
 - `SKILLSPECTOR_PROVIDER` — set to `openai` by the server when spawning the scanner (not required in `.env`)
-- `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`)
+- `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`). Strongly recommended: the AI analyzer stage makes per-node LLM calls, so a fast model keeps scans well under the timeout
+- `SKILLSPECTOR_TIMEOUT_MS` — optional scan timeout in milliseconds (default 10 min); raise for very large repos or slow models
 
 If the `.venv` is absent the feature degrades gracefully: `GET /api/skill-inspector/status` returns `scannerAvailable: false` and scan requests return a friendly 503 without crashing the app.

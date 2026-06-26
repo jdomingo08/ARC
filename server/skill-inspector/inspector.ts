@@ -22,7 +22,12 @@ export interface RunOpts {
   llm?: boolean;
 }
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+// AI analyzer stage makes per-node LLM calls and can be slow; default 10 min,
+// overridable via SKILLSPECTOR_TIMEOUT_MS (ms) for large repos or slow models.
+const FALLBACK_TIMEOUT_MS = 10 * 60 * 1000;
+const ENV_TIMEOUT_MS = Number(process.env.SKILLSPECTOR_TIMEOUT_MS);
+const DEFAULT_TIMEOUT_MS =
+  Number.isFinite(ENV_TIMEOUT_MS) && ENV_TIMEOUT_MS > 0 ? ENV_TIMEOUT_MS : FALLBACK_TIMEOUT_MS;
 const PERSIST_THROTTLE_MS = 500;
 
 export class SkillInspector extends EventEmitter {
