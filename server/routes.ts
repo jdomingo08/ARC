@@ -2055,7 +2055,7 @@ export async function registerRoutes(
 
         const inspector = new SkillInspector(storage);
         inspector.on("scan-start", (d) => sendEvent("scan-start", { ...d, scanId: scan.id }));
-        inspector.on("progress", (d) => sendEvent("progress", d));
+        inspector.on("step", (d) => sendEvent("step", d));
         inspector.on("complete", (d) => {
           sendEvent("complete", d);
           res.end();
