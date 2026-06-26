@@ -85,6 +85,8 @@ A single module-wide cron (`server/integrations/usage-scheduler.ts`, default `0 
 ### Skill Inspector
 Wraps NVIDIA SkillSpector (Python 3.12), installed into a `.venv` baked into the Replit build (see `replit.nix` + `script/build.ts`). The scanner is invoked as a child process and streams live progress to the client over SSE. Scan results are persisted to the `skill_scans` table and surfaced in "My scans".
 
+**Live scan progress:** progress is streamed from SkillSpector's LangGraph workflow via `server/skill-inspector/skillspector_stream.py` (run by the venv's Python), which emits one NDJSON event per finished graph node. The inspector drives a pure step state machine (`server/skill-inspector/step-machine.ts`) over the fixed 25-node catalog (`shared/skill-inspector-types.ts`) to derive pending/running/done/failed, persists per-step state on `skill_scans.steps` (jsonb) + `skill_scans.current_step`, and forwards it over the existing SSE as `step` events. The client renders a phase-grouped checklist live (`client/src/components/skill-inspector/scan-progress.tsx`); if the SSE stream drops mid-scan it falls back to polling the scan row, and "My scans" auto-polls while any scan is running.
+
 - `OPENAI_API_KEY` — reused from the main AI config; passed to SkillSpector for its LLM analysis stage
 - `SKILLSPECTOR_PROVIDER` — set to `openai` by the server when spawning the scanner (not required in `.env`)
 - `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`)
