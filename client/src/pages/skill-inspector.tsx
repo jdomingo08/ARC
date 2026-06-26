@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -9,8 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Loader2, ShieldCheck, ShieldAlert, ShieldX, HelpCircle, Github, Upload } from "lucide-react";
-import { verdictLabel } from "@shared/skill-inspector-types";
+import { verdictLabel, type StepState } from "@shared/skill-inspector-types";
 import type { SkillScan } from "@shared/schema";
+import { ScanProgress } from "@/components/skill-inspector/scan-progress";
 
 type Mode = "url" | "upload";
 
@@ -35,16 +36,54 @@ export default function SkillInspectorPage() {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<string>("");
   const [result, setResult] = useState<SkillScan | null>(null);
+  const [steps, setSteps] = useState<StepState[]>([]);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const scanIdRef = useRef<string | null>(null);
 
   const { data: history, isLoading: historyLoading } = useQuery<SkillScan[]>({
     queryKey: ["/api/skill-inspector/scans"],
+    refetchInterval: (query) => {
+      const rows = (query.state.data as SkillScan[] | undefined) ?? [];
+      return rows.some((r) => r.status === "running") ? 2500 : false;
+    },
   });
+
+  useEffect(() => {
+    if (!scanning || startedAt == null) return;
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [scanning, startedAt]);
+
+  async function pollScanUntilDone(scanId: string) {
+    // The scan keeps running server-side; poll its persisted steps until complete/failed.
+    while (true) {
+      await new Promise((r) => setTimeout(r, 2500));
+      let row: SkillScan;
+      try {
+        const res = await fetch(`/api/skill-inspector/scans/${scanId}`, { credentials: "include" });
+        if (!res.ok) return; // give up quietly; "My scans" list polling still covers it
+        row = (await res.json()) as SkillScan;
+      } catch {
+        return;
+      }
+      if (Array.isArray((row as any).steps)) setSteps((row as any).steps as StepState[]);
+      if (row.status !== "running") {
+        setResult(row);
+        queryClient.invalidateQueries({ queryKey: ["/api/skill-inspector/scans"] });
+        return;
+      }
+    }
+  }
 
   async function runScan() {
     setResult(null);
     setProgress("Starting scan…");
     setScanning(true);
+    scanIdRef.current = null;
+    setStartedAt(Date.now());
+    setSteps([]);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
@@ -85,8 +124,11 @@ export default function SkillInspectorPage() {
           if (!evLine || !dataLine) continue;
           const event = evLine.slice(6).trim();
           const data = JSON.parse(dataLine.slice(5).trim());
-          if (event === "progress") setProgress(data.line);
-          else if (event === "complete") {
+          if (event === "scan-start") scanIdRef.current = data.scanId ?? null;
+          else if (event === "step") setSteps(data.steps as StepState[]);
+          else if (event === "progress") {
+            /* legacy no-op */
+          } else if (event === "complete") {
             setResult(data.scan as SkillScan);
             setProgress("");
             queryClient.invalidateQueries({ queryKey: ["/api/skill-inspector/scans"] });
@@ -96,7 +138,12 @@ export default function SkillInspectorPage() {
         }
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") {
+      if (e?.name === "AbortError") {
+        // user cancelled — nothing to do
+      } else if (scanIdRef.current) {
+        // stream dropped but the scan is still running server-side — keep showing live progress via polling
+        await pollScanUntilDone(scanIdRef.current);
+      } else {
         toast({ title: "Scan failed", description: e.message, variant: "destructive" });
       }
     } finally {
@@ -152,7 +199,15 @@ export default function SkillInspectorPage() {
           >
             {scanning ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Scanning…</> : "Scan skill"}
           </Button>
-          {scanning && progress && <p className="text-sm text-muted-foreground">{progress}</p>}
+          {scanning && <ScanProgress steps={steps} elapsedSec={elapsed} />}
+          {result && Array.isArray(result.steps) && !scanning && (
+            <details className="rounded-md border p-2 text-sm">
+              <summary className="cursor-pointer text-muted-foreground">Scan steps</summary>
+              <div className="pt-2">
+                <ScanProgress steps={result.steps as StepState[]} />
+              </div>
+            </details>
+          )}
         </CardContent>
       </Card>
 
@@ -189,7 +244,10 @@ export default function SkillInspectorPage() {
 }
 
 function ScanStatusBadge({ scan }: { scan: SkillScan }) {
-  if (scan.status === "running") return <Badge variant="secondary">Running…</Badge>;
+  if (scan.status === "running") {
+    const label = (scan as any).currentStep ? `Running · ${(scan as any).currentStep}` : "Running…";
+    return <Badge variant="secondary">{label}</Badge>;
+  }
   if (scan.status === "failed") return <Badge className={toneStyles.danger}>Failed</Badge>;
   const v = verdictLabel((scan.riskLevel as any) ?? "unknown");
   return <Badge className={toneStyles[v.tone]}>{v.label}</Badge>;
