@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { pool } from "./db";
+import { SESSION_TABLE_DDL } from "./session";
 import { eq, desc, and, ilike, sql, gte, lte, asc, inArray } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
@@ -142,6 +143,7 @@ export interface IStorage {
   updateSkillScan(id: string, data: Partial<SkillScan>): Promise<SkillScan | undefined>;
 
   seedData(): Promise<void>;
+  ensureSessionTable(): Promise<void>;
   runStartupMigrations(): Promise<void>;
 }
 
@@ -914,6 +916,19 @@ export class DatabaseStorage implements IStorage {
       return query.where(eq(apiSyncLogs.provider, provider)).orderBy(desc(apiSyncLogs.createdAt)).limit(limit);
     }
     return query.orderBy(desc(apiSyncLogs.createdAt)).limit(limit);
+  }
+
+  // Creates the login session table used by connect-pg-simple.
+  //
+  // This runs before the session middleware mounts (rather than inside
+  // runStartupMigrations, which runs after routes are registered) so the store
+  // never receives a query for a table that does not exist yet.
+  //
+  // The DDL mirrors connect-pg-simple's bundled table.sql exactly. IF NOT EXISTS
+  // makes it a no-op on every deploy after the first, so existing sessions —
+  // i.e. everyone who is currently signed in — are left untouched.
+  async ensureSessionTable(): Promise<void> {
+    await pool.query(SESSION_TABLE_DDL);
   }
 
   async runStartupMigrations(): Promise<void> {
