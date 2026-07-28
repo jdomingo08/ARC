@@ -87,7 +87,7 @@ The app is deployed on Replit. Environment variables are set via **Replit Secret
 | `GOOGLE_CLIENT_SECRET` | `GOCSPX-...` | Yes (for SSO) | From GCP Step 3 above — treat as a password |
 | `GOOGLE_CALLBACK_URL` | `https://[your-app-url]/api/auth/google/callback` | Recommended | Full URL including protocol. If omitted, defaults to relative path which works but explicit is safer |
 | `GOOGLE_ALLOWED_DOMAIN` | `entravision.com,smadex.com,adwake.ai` | Recommended | Defense-in-depth domain check in code. Comma-separated for multiple domains. Even if GCP consent screen is set to Internal, this adds a second layer |
-| `SESSION_SECRET` | `a-long-random-string-at-least-32-chars` | Yes (for production) | Currently defaults to a dev value which is insecure for production |
+| `SESSION_SECRET` | `a-long-random-string-at-least-32-chars` | **Yes — required in production** | The server refuses to start in production without it. Outside production it falls back to a development value that is committed to this repo, so it must never be relied on in a deployment |
 
 ### Variables already set (no changes needed)
 

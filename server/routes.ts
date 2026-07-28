@@ -3,8 +3,10 @@ import { createServer, type Server } from "http";
 import session from "express-session";
 import passport from "passport";
 import multer from "multer";
+import { pool } from "./db";
 import { storage } from "./storage";
 import { configurePassport } from "./auth";
+import { buildSessionOptions } from "./session";
 import { createLLMProvider } from "./ai/provider";
 import { RiskScanner } from "./risk-agent/scanner";
 import { getProviderMeta, listProviderKeys } from "./integrations/registry";
@@ -46,6 +48,15 @@ async function requireAuth(req: ExpReq, res: Response, next: NextFunction) {
   next();
 }
 
+// The development-only email-click login screen has to list accounts before any
+// session exists, so that one endpoint stays open outside production. In
+// production, sign-in goes through Google SSO and the roster (names, emails,
+// departments) must not be readable anonymously.
+async function requireAuthInProduction(req: ExpReq, res: Response, next: NextFunction) {
+  if (process.env.NODE_ENV !== "production") return next();
+  return requireAuth(req, res, next);
+}
+
 function requireRole(...roles: string[]) {
   return (req: ExpReq, res: Response, next: NextFunction) => {
     const user = (req as any).user as User;
@@ -61,18 +72,11 @@ export async function registerRoutes(
   // Trust Replit's reverse proxy so secure cookies work behind HTTPS termination
   app.set("trust proxy", 1);
 
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "arc-intelligence-dev-secret",
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 24 * 60 * 60 * 1000,
-        sameSite: "lax",
-      },
-    })
-  );
+  // Must happen before the session middleware mounts so the Postgres-backed
+  // store never queries a table that doesn't exist yet.
+  await storage.ensureSessionTable();
+
+  app.use(session(buildSessionOptions({ pool })));
 
   // Initialize Passport for Google SSO
   configurePassport();
@@ -167,7 +171,7 @@ export async function registerRoutes(
     });
   });
 
-  app.get("/api/users", async (_req, res) => {
+  app.get("/api/users", requireAuthInProduction, async (_req, res) => {
     try {
       const allUsers = await storage.getAllUsers();
       res.json(allUsers);

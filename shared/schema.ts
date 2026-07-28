@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, decimal, index, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -54,6 +54,23 @@ export type SkillScanInputType = z.infer<typeof skillScanInputTypeEnum>;
 
 export const skillScanRiskLevelEnum = z.enum(["low", "medium", "high", "critical", "unknown"]);
 export type SkillScanRiskLevel = z.infer<typeof skillScanRiskLevelEnum>;
+
+// Login session storage, read and written by connect-pg-simple (not by Drizzle).
+// It is declared here purely so `drizzle-kit push` knows the table is expected and
+// does not offer to drop it — dropping it would sign every user out.
+// The column shapes must stay byte-for-byte compatible with connect-pg-simple's
+// own table.sql; see ensureSessionTable() in server/storage.ts.
+export const session = pgTable(
+  "session",
+  {
+    sid: varchar("sid").primaryKey(),
+    sess: json("sess").notNull(),
+    expire: timestamp("expire", { precision: 6 }).notNull(),
+  },
+  (table) => ({
+    expireIdx: index("IDX_session_expire").on(table.expire),
+  })
+);
 
 export const users = pgTable("users", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
