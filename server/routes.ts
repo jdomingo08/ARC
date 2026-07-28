@@ -29,10 +29,44 @@ import { SkillInspector } from "./skill-inspector/inspector";
 import { validateGitHubUrl, validateUploadName } from "./skill-inspector/validate";
 import { skillSpectorAvailable } from "./skill-inspector/skillspector-cli";
 
+// Maximum accepted upload size. Overridable per-deployment because the ceiling
+// that suits vendor security packets (SOC 2 reports and the like) is a policy
+// decision, not a code constant.
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 10);
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
 });
+
+/**
+ * `upload.single()` reports rejections by calling next(err), which lands in the
+ * generic error handler and surfaces as an opaque 500 — "File too large" with no
+ * indication of what the limit is. Translate those into accurate statuses and
+ * self-explanatory messages instead.
+ */
+function uploadSingle(field: string) {
+  return (req: ExpReq, res: Response, next: NextFunction) => {
+    upload.single(field)(req as any, res as any, (err: unknown) => {
+      if (!err) return next();
+
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(413).json({
+            message:
+              `File is larger than the ${MAX_UPLOAD_MB} MB upload limit. ` +
+              `Compress it or split it, or raise MAX_UPLOAD_MB on the deployment.`,
+          });
+        }
+        return res
+          .status(400)
+          .json({ message: `Upload rejected (${err.code}): ${err.message}` });
+      }
+
+      return next(err);
+    });
+  };
+}
 
 declare module "express-session" {
   interface SessionData {
@@ -1317,7 +1351,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/requests/:id/attachments", requireAuth, upload.single("file"), async (req, res) => {
+  app.post("/api/requests/:id/attachments", requireAuth, uploadSingle("file"), async (req, res) => {
     try {
       const user = (req as any).user as User;
       const request = await storage.getRequest(req.params.id);
@@ -1349,6 +1383,9 @@ export async function registerRoutes(
         throw dbErr;
       }
     } catch (e: any) {
+      // Log the full error: the response only carries e.message, which for an
+      // object-storage failure omits the cause that identifies the misconfiguration.
+      console.error(`Attachment upload failed for request ${req.params.id}:`, e);
       res.status(500).json({ message: e.message });
     }
   });
@@ -1578,7 +1615,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/platforms/:id/attachments", requireAuth, upload.single("file"), async (req, res) => {
+  app.post("/api/platforms/:id/attachments", requireAuth, uploadSingle("file"), async (req, res) => {
     try {
       const user = (req as any).user as User;
       const platform = await storage.getPlatform(req.params.id);
@@ -1997,7 +2034,7 @@ export async function registerRoutes(
     "/api/skill-inspector/scan",
     requireAuth,
     requireRole("reviewer", "chair", "admin"),
-    upload.single("file"),
+    uploadSingle("file"),
     async (req, res) => {
       try {
         if (!skillSpectorAvailable()) {

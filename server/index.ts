@@ -22,6 +22,15 @@ if (rawAdminReviewerRole) {
   }
 }
 
+// Node terminates the process on an unhandled promise rejection. A stray
+// rejection from a dependency — the object-storage client resolving its bucket,
+// for instance — would therefore take down an entire Autoscale instance mid-flight
+// instead of failing the one request that depended on it. Log it and keep
+// serving; per-request failures are already handled by the error middleware below.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection (instance kept alive):", reason);
+});
+
 const app = express();
 const httpServer = createServer(app);
 
