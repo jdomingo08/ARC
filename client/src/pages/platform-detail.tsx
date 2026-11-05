@@ -40,6 +40,8 @@ import {
   Download,
   Paperclip,
   UserPlus,
+  FileCheck,
+  Zap,
 } from "lucide-react";
 import type { Platform, Tier, RiskFinding, Request, PlatformAttributeDefinition, PlatformStakeholder, ExpirationAlert, PlatformAttachment } from "@shared/schema";
 
@@ -678,10 +680,30 @@ export default function PlatformDetailPage() {
                   <Separator />
                   <div>
                     <p className="text-sm font-medium mb-1">Decision Summary</p>
-                    <p className="text-sm text-muted-foreground">{platform.decisionSummary}</p>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{platform.decisionSummary}</p>
                   </div>
                 </>
               )}
+
+              {(() => {
+                // Most recent approved request for this platform (list is newest first).
+                const approvedRequest = linkedRequests?.find(r => r.status === "approved");
+                if (!approvedRequest) return null;
+                return (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/requests/${approvedRequest.id}/approval-report`}>
+                      <Button variant="outline" size="sm" data-testid="button-platform-approval-report">
+                        <FileCheck className="h-4 w-4 mr-1" /> Approval Report · {approvedRequest.trackingId}
+                      </Button>
+                    </Link>
+                    {approvedRequest.fastTrackApproval && (
+                      <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-400">
+                        <Zap className="h-3 w-3 mr-1" /> Fast-Track
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
 

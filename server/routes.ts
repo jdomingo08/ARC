@@ -15,6 +15,20 @@ import { TOOL_INSIGHTS_SYSTEM_PROMPT, buildToolInsightsPrompt } from "./ai/tool-
 import type { User, PlatformAttributeDefinition } from "@shared/schema";
 import { adminEditRequestSchema, requestAttachmentSectionEnum } from "@shared/schema";
 import {
+  FAST_TRACK_LABEL,
+  fastTrackApprovalInputSchema,
+  type FastTrackApprovalRecord,
+  type FastTrackSignoffRecord,
+} from "@shared/approval";
+import {
+  buildApprovalReport,
+  fastTrackDecisionSummary,
+  formatRole,
+  orderSignoffs,
+  planFastTrack,
+  splitConditions,
+} from "./fast-track";
+import {
   buildPlatformKey,
   buildRequestKey,
   deleteObject,
@@ -210,6 +224,7 @@ export async function registerRoutes(
     try {
       const user = (req as any).user as User;
       const data = req.body;
+      delete data.fastTrackApproval; // only set by the fast-track endpoint
       data.requesterId = user.id;
       data.requesterName = data.requesterName || user.name;
       data.department = data.department || user.department;
@@ -250,6 +265,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Missing required fields: toolName, primaryGoal, impactLevel" });
       }
 
+      delete data.fastTrackApproval; // only set by the fast-track endpoint
       data.requesterId = user.id;
       data.requesterName = user.name;
       data.department = data.department || user.department;
@@ -350,6 +366,7 @@ export async function registerRoutes(
 
       // When returning to pending_reviews from a waiting state, clear waitingOnRole
       const body = req.body;
+      delete body.fastTrackApproval; // only set by the fast-track endpoint
       if (body.status === "pending_reviews" &&
           (before.status === "waiting_on_requester" || before.status === "waiting_on_reviewer")) {
         body.waitingOnRole = null;
@@ -642,6 +659,180 @@ export async function registerRoutes(
       }
 
       res.json(reviewDecision);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Fast-Track Approval (admin only): record who signed off on each review stage,
+  // then approve the request in one step, overriding any stages still open.
+  app.post("/api/requests/:id/fast-track-approve", requireAuth, requireRole("admin"), async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const requestId = req.params.id as string;
+      const request = await storage.getRequest(requestId);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (request.status === "approved") {
+        return res.status(400).json({ message: "This request is already approved" });
+      }
+      if (request.status === "draft") {
+        return res.status(400).json({ message: "Drafts must be submitted before they can be approved" });
+      }
+
+      const parsed = fastTrackApprovalInputSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        const message = parsed.error.issues.map(i => `${i.path.join(".") || "body"}: ${i.message}`).join("; ");
+        return res.status(400).json({ message });
+      }
+      const comments = parsed.data.comments || null;
+      const conditions = parsed.data.conditions || null;
+
+      const [allReviews, wfSteps, allUsers] = await Promise.all([
+        storage.getReviewDecisionsByRequest(requestId),
+        storage.getWorkflowSteps(),
+        storage.getAllUsers(),
+      ]);
+      const activeReviews = allReviews.filter(r => !r.superseded);
+
+      const planned = planFastTrack({ signoffs: parsed.data.signoffs, activeReviews, workflowSteps: wfSteps, users: allUsers });
+      if (!planned.ok) return res.status(400).json({ message: planned.error });
+      const { plan } = planned;
+
+      // Open fail / needs-more-info decisions on stages being signed off no longer apply.
+      await storage.supersedeReviewDecisions(requestId, plan.supersedeIds);
+
+      const created: FastTrackSignoffRecord[] = [];
+      for (const s of plan.create) {
+        const decision = await storage.createReviewDecision({
+          requestId,
+          reviewerRole: s.reviewerRole,
+          reviewerId: s.reviewerId,
+          decision: "pass",
+          rationale: `Sign-off recorded via ${FAST_TRACK_LABEL} by ${user.name}.`,
+          riskNotes: null,
+          conditions: null,
+          routedToRole: null,
+        });
+        created.push({ ...s, decisionId: decision.id, recordedViaFastTrack: true });
+      }
+
+      const now = new Date();
+      const record: FastTrackApprovalRecord = {
+        approvedById: user.id,
+        approvedByName: user.name,
+        approvedAt: now.toISOString(),
+        previousStatus: request.status,
+        comments,
+        conditions,
+        signoffs: orderSignoffs([...plan.existing, ...created], wfSteps),
+      };
+
+      // Make sure the tool is in the inventory, then mark it approved there.
+      let platform = request.platformId ? await storage.getPlatform(request.platformId) : undefined;
+      if (!platform) {
+        platform = (await storage.getPlatformByToolName(request.toolName)) ?? (await storage.createPlatform({
+          toolName: request.toolName,
+          status: "on_review",
+          department: request.department,
+          primaryGoal: request.primaryGoal,
+          estimatedUsers: request.estimatedUsers,
+          impactLevel: request.impactLevel,
+          costStructure: request.costStructure || null,
+          annualCost: request.annualCost || null,
+          dataInput: request.dataInput || null,
+          dataTraining: request.dataTraining || null,
+          loginMethod: request.loginMethod || null,
+          logoUrl: getLogoUrl(request.toolName),
+          ownerId: request.requesterId,
+        }));
+      }
+
+      const reviewConditions = activeReviews
+        .filter(r => r.decision === "pass" && r.conditions)
+        .map(r => r.conditions as string);
+      const platformBefore = { status: platform.status, decisionSummary: platform.decisionSummary };
+      const updatedPlatform = await storage.updatePlatform(platform.id, {
+        status: "approved",
+        approvalDate: now,
+        lastReviewedAt: now,
+        decisionSummary: fastTrackDecisionSummary({
+          approvedByName: user.name,
+          comments,
+          conditions: [conditions, ...reviewConditions].flatMap(c => splitConditions(c)),
+        }),
+      });
+
+      const updated = await storage.updateRequest(requestId, {
+        status: "approved",
+        locked: true,
+        waitingOnRole: null,
+        platformId: platform.id,
+        fastTrackApproval: record,
+      });
+
+      await storage.createAuditLog({
+        entityType: "request",
+        entityId: requestId,
+        action: "fast_track_approved",
+        before: { status: request.status, waitingOnRole: request.waitingOnRole },
+        after: {
+          status: "approved",
+          signoffs: record.signoffs.map(s => ({
+            stepName: s.stepName,
+            reviewerName: s.reviewerName,
+            recordedViaFastTrack: s.recordedViaFastTrack,
+          })),
+          comments,
+          conditions,
+          supersededDecisionIds: plan.supersedeIds,
+        },
+        actorId: user.id,
+      });
+      await storage.createAuditLog({
+        entityType: "platform",
+        entityId: platform.id,
+        action: "fast_track_approved",
+        before: platformBefore,
+        after: { status: updatedPlatform?.status, decisionSummary: updatedPlatform?.decisionSummary, requestId },
+        actorId: user.id,
+      });
+
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // Data for the printable approval report (any approved request, fast-tracked or not).
+  app.get("/api/requests/:id/approval-report", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user as User;
+      const request = await storage.getRequest(req.params.id as string);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (user.role === "requester" && request.requesterId !== user.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [reviews, allUsers, wfSteps, auditLogs] = await Promise.all([
+        storage.getReviewDecisionsByRequest(request.id),
+        storage.getAllUsers(),
+        storage.getWorkflowSteps(),
+        storage.getAuditLogsByEntity("request", request.id),
+      ]);
+      const platform = request.platformId ? (await storage.getPlatform(request.platformId)) ?? null : null;
+      const tier = platform?.tierId ? await storage.getTier(platform.tierId) : undefined;
+      const tierName = tier?.name ?? (request.tierAssignment ? formatRole(request.tierAssignment) : null);
+      const approvedLog = auditLogs.find(l => l.action === "approved") ?? null; // newest first
+
+      res.json(buildApprovalReport({
+        request,
+        platform,
+        tierName,
+        reviews,
+        users: allUsers.map(u => ({ id: u.id, name: u.name })),
+        workflowSteps: wfSteps,
+        approvedLog: approvedLog ? { timestamp: approvedLog.timestamp, actorId: approvedLog.actorId } : null,
+      }));
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
