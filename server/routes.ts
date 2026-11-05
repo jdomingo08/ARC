@@ -364,9 +364,26 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
 
-      // When returning to pending_reviews from a waiting state, clear waitingOnRole
       const body = req.body;
       delete body.fastTrackApproval; // only set by the fast-track endpoint
+
+      // Workflow state moves through the review / lock / fast-track endpoints.
+      // The one status change allowed here for non-admins is resubmitting a
+      // request that is waiting on someone (back to pending_reviews).
+      if (user.role !== "admin") {
+        const isResubmit = body.status === "pending_reviews" &&
+          (before.status === "waiting_on_requester" || before.status === "waiting_on_reviewer");
+        if (body.status !== undefined && body.status !== before.status && !isResubmit) {
+          return res.status(403).json({ message: "Status can only be changed through the review workflow" });
+        }
+        delete body.locked;
+        delete body.waitingOnRole;
+        delete body.platformId;
+        delete body.requesterId;
+        delete body.trackingId;
+      }
+
+      // When returning to pending_reviews from a waiting state, clear waitingOnRole
       if (body.status === "pending_reviews" &&
           (before.status === "waiting_on_requester" || before.status === "waiting_on_reviewer")) {
         body.waitingOnRole = null;
