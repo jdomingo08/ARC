@@ -85,7 +85,10 @@ export class SkillInspector extends EventEmitter {
         await persist(steps);
       });
 
-      const verdict = parseSkillSpectorOutput(report);
+      // Postgres jsonb rejects null bytes (U+0000); SkillSpector output can contain them
+      // (e.g. when quoting scanned file contents). Strip them before parse + persist.
+      const cleanReport = stripNullBytes(report);
+      const verdict = parseSkillSpectorOutput(cleanReport);
       const finalSteps = deriveSteps(new Set(initialSteps().map((s) => s.node))); // all done
       const updated = await this.storage.updateSkillScan(opts.scanId, {
         status: "complete",
@@ -94,7 +97,7 @@ export class SkillInspector extends EventEmitter {
         recommendation: verdict.recommendation,
         summary: verdict.summary as any,
         findings: verdict.findings as any,
-        rawOutput: safeJson(report) as any,
+        rawOutput: safeJson(cleanReport) as any,
         steps: finalSteps as any,
         currentStep: null,
         completedAt: new Date(),
@@ -210,4 +213,10 @@ function safeJson(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+// Postgres jsonb cannot store NUL (U+0000); SkillSpector output may include it
+// when echoing scanned file contents. Remove it before parsing/persisting.
+export function stripNullBytes(text: string): string {
+  return text.split(String.fromCharCode(0)).join("");
 }
