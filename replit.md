@@ -29,6 +29,11 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 3. Strategic (LeaAnna) review is advisory
 4. Both Chairs (Jeff + Kirun) must approve after Security + Tech pass
 5. "Needs More Info" pauses workflow, returns to requester
+6. **Fast-Track Approval** (admin only): button at the bottom of the Review Status card on `/requests/:id`. The admin ticks who signed off on each stage (Security, Tech/Financial, Chair, Strategic, or anyone else via "Add someone else"), adds approval comments and conditions, then approves in one step. Any stage left open is overridden.
+   - Each new sign-off is stored as a normal `pass` review decision ("Sign-off recorded via Fast-Track Approval by …"); people who already passed keep their original decision. Open fail / needs-more-info decisions on a stage being signed off are superseded; nothing is deleted.
+   - The request is set to `approved` and locked, its platform is set to `approved` in the inventory (created if missing) with a decision summary, and both get a `fast_track_approved` audit log entry.
+   - The full record (approver, time, previous status, comments, conditions, sign-offs) is kept on `requests.fast_track_approval` (JSONB). It can only be written by `POST /api/requests/:id/fast-track-approve`.
+7. **Approval Report**: every approved request (fast-tracked or not) has a printable certificate at `/requests/:id/approval-report` with the tool name, ARC ID, an approval stamp, stage-by-stage sign-offs, comments and conditions. "Print / Save PDF" produces a one-page letter PDF for typical requests. Linked from the Review Status card and from the platform's detail page.
 
 ## Key Files
 - `shared/schema.ts` - All Drizzle schemas, Zod types, enums
@@ -40,13 +45,18 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - `client/src/components/app-sidebar.tsx` - Navigation sidebar
 - `client/src/components/status-badge.tsx` - Status/role/risk badges
 - `client/src/components/review-panel.tsx` - Review submission form
+- `shared/approval.ts` - Fast-Track Approval input schema, stored record type, and approval report payload type
+- `server/fast-track.ts` - Pure logic for planning a fast-track approval and assembling the approval report (tested in `server/__tests__/fast-track.test.ts`)
+- `client/src/components/fast-track-approval-dialog.tsx` - Fast-Track Approval dialog
+- `client/src/pages/approval-report.tsx` - Printable approval certificate (rendered outside the app shell)
 - `server/skill-inspector/*` - SkillSpector integration (inspector pipeline, input validation, output parser, venv CLI path)
 
 ## Pages
 - `/` - Dashboard with stats and recent requests
 - `/requests/new` - 4-step intake form wizard
 - `/requests` - My Requests list
-- `/requests/:id` - Request detail with review status
+- `/requests/:id` - Request detail with review status (and Fast-Track Approval for admins)
+- `/requests/:id/approval-report` - Printable approval certificate for an approved request
 - `/reviews` - Reviewer inbox
 - `/platforms` - Platform inventory list
 - `/platforms/:id` - Platform detail with findings
