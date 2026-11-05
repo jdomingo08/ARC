@@ -36,6 +36,12 @@ d("SkillInspector (integration, requires .venv)", () => {
     expect(scan.status).toBe("complete");
     expect(["low", "medium", "high", "critical", "unknown"]).toContain(scan.riskLevel);
     expect(Array.isArray(scan.findings)).toBe(true);
+    // Assert that the persisted row ends with all 25 steps done and currentStep null.
+    const persisted = storage.rows.get("scan1");
+    expect(Array.isArray(persisted.steps)).toBe(true);
+    expect(persisted.steps.length).toBe(25);
+    expect(persisted.steps.every((s: any) => s.status === "done")).toBe(true);
+    expect(persisted.currentStep).toBeNull();
   }, 130000);
 
   it("completes a clean skill without error", async () => {

@@ -43,11 +43,14 @@ import {
   ShieldCheck,
   Clock,
   HelpCircle,
+  Zap,
+  FileCheck,
 } from "lucide-react";
 import { getFilteredQuestions } from "@shared/vendor-questions";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ToolInsightsFeed } from "@/components/tool-insights-feed";
-import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment, WorkflowStep } from "@shared/schema";
+import { FastTrackApprovalDialog } from "@/components/fast-track-approval-dialog";
+import type { Request, ReviewDecision, AuditLog, RequestComment, RequestAttachment, WorkflowStep, User } from "@shared/schema";
 
 export default function RequestDetailPage() {
   const [, params] = useRoute("/requests/:id");
@@ -60,6 +63,7 @@ export default function RequestDetailPage() {
   const [editData, setEditData] = useState<Partial<Request>>({});
   const [commentText, setCommentText] = useState("");
   const [adminOverrideRole, setAdminOverrideRole] = useState<string>("");
+  const [fastTrackOpen, setFastTrackOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: request, isLoading } = useQuery<Request>({
@@ -90,6 +94,11 @@ export default function RequestDetailPage() {
   const { data: workflowSteps } = useQuery<WorkflowStep[]>({
     queryKey: ["/api/workflow-steps"],
   });
+
+  const { data: allUsers } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+  });
+  const userName = (userId: string) => allUsers?.find(u => u.id === userId)?.name;
 
   // Vendor security review state
   const [securityAssessments, setSecurityAssessments] = useState<Record<string, string>>({});
@@ -311,6 +320,8 @@ export default function RequestDetailPage() {
   const isAdmin = user?.role === "admin";
   const isOwner = user?.id === request.requesterId;
   const canEdit = !request.locked ? (isOwner || isAdmin) : isAdmin;
+  const fastTrack = request.fastTrackApproval ?? null;
+  const canFastTrack = isAdmin && request.status !== "approved" && request.status !== "draft";
 
   // Needs-more-info decisions directed at the current user (requester or targeted reviewer)
   const needsMoreInfoForMe = activeReviews.filter(r =>
@@ -1035,6 +1046,7 @@ export default function RequestDetailPage() {
                           requireCount={step.minApprovals > 1 ? step.minApprovals : undefined}
                           locked={isLocked}
                           optional={!step.required}
+                          reviewerName={userName}
                         />
                       </div>
                     );
@@ -1042,15 +1054,65 @@ export default function RequestDetailPage() {
                 </>
               ) : (
                 <>
-                  <ReviewStep label="Security Review" subtitle="Required" review={securityReview} />
+                  <ReviewStep label="Security Review" subtitle="Required" review={securityReview} reviewerName={userName} />
                   <ProgressArrow status={securityReview?.decision} />
-                  <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} />
+                  <ReviewStep label="Tech/Financial Review" subtitle="Required" review={techReview} reviewerName={userName} />
                   <ProgressArrow status={techReview?.decision} />
-                  <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} />
+                  <ReviewStep label="Chair Sign-off" subtitle="Both required" reviews={chairReviews} requireCount={2} locked={!canChairApprove && request.status === "pending_reviews"} reviewerName={userName} />
                 </>
+              )}
+
+              {(fastTrack || canFastTrack || request.status === "approved") && (
+                <div className="mt-4 pt-4 border-t space-y-3">
+                  {fastTrack && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3" data-testid="fast-track-summary">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-amber-600" />
+                        <p className="text-sm font-semibold">Fast-Track Approved</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        By {fastTrack.approvedByName} · {formatDate(fastTrack.approvedAt)}
+                      </p>
+                      {fastTrack.comments && (
+                        <p className="text-xs mt-2 whitespace-pre-wrap"><span className="font-medium">Comments:</span> {fastTrack.comments}</p>
+                      )}
+                      {fastTrack.conditions && (
+                        <p className="text-xs mt-1 whitespace-pre-wrap"><span className="font-medium">Conditions:</span> {fastTrack.conditions}</p>
+                      )}
+                    </div>
+                  )}
+                  {canFastTrack && (
+                    <div className="space-y-1.5">
+                      <Button className="w-full" onClick={() => setFastTrackOpen(true)} data-testid="button-fast-track">
+                        <Zap className="h-4 w-4 mr-1" /> Fast-Track Approval
+                      </Button>
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        Admin override: record sign-offs and approve in one step
+                      </p>
+                    </div>
+                  )}
+                  {request.status === "approved" && (
+                    <Link href={`/requests/${request.id}/approval-report`}>
+                      <Button variant="outline" className="w-full" data-testid="button-approval-report">
+                        <FileCheck className="h-4 w-4 mr-1" /> View Approval Report
+                      </Button>
+                    </Link>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
+
+          {canFastTrack && (
+            <FastTrackApprovalDialog
+              open={fastTrackOpen}
+              onOpenChange={setFastTrackOpen}
+              request={request}
+              workflowSteps={workflowSteps || []}
+              activeReviews={activeReviews}
+              users={allUsers || []}
+            />
+          )}
 
           {auditLogs && auditLogs.length > 0 && (
             <Card>
@@ -1081,6 +1143,11 @@ export default function RequestDetailPage() {
                     } else if (log.action === "approved" && after) {
                       title = "Request Approved";
                       detail = `All required reviews complete — final sign-off by ${fmtRole(after.finalReviewerRole ?? "")}`;
+                    } else if (log.action === "fast_track_approved" && after) {
+                      title = "Fast-Track Approved";
+                      const names = Array.isArray(after.signoffs) ? after.signoffs.map((s: any) => s.reviewerName) : [];
+                      detail = names.length > 0 ? `Sign-offs: ${names.join(", ")}` : "Approved without recorded sign-offs";
+                      if (after.conditions) detail += ` · Conditions: ${after.conditions}`;
                     } else if (log.action === "resubmitted") {
                       detail = "Returned to pending reviews";
                     } else if (log.action === "admin_override" && after) {
@@ -1160,7 +1227,7 @@ function ProgressArrow({ status }: { status?: string }) {
   );
 }
 
-function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, locked }: {
+function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, locked, reviewerName }: {
   label: string;
   subtitle: string;
   review?: ReviewDecision;
@@ -1168,6 +1235,7 @@ function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, 
   requireCount?: number;
   optional?: boolean;
   locked?: boolean;
+  reviewerName?: (userId: string) => string | undefined;
 }) {
   const items = reviews || (review ? [review] : []);
   const passCount = items.filter(r => r.decision === "pass").length;
@@ -1206,6 +1274,9 @@ function ReviewStep({ label, subtitle, review, reviews, requireCount, optional, 
       </div>
       {items.map((r, i) => (
         <div key={i} className="mt-2 text-xs text-muted-foreground">
+          {reviewerName?.(r.reviewerId) && (
+            <p className="font-medium text-foreground/80">{reviewerName(r.reviewerId)}</p>
+          )}
           <p>{r.rationale}</p>
           {r.conditions && <p className="mt-1 font-medium">Conditions: {r.conditions}</p>}
         </div>

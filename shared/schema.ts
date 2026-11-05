@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import type { FastTrackApprovalRecord } from "./approval";
 
 export const userRoleEnum = z.enum(["requester", "reviewer", "chair", "admin"]);
 export type UserRole = z.infer<typeof userRoleEnum>;
@@ -110,6 +111,8 @@ export const requests = pgTable("requests", {
   vendorSecurityReviewedAt: timestamp("vendor_security_reviewed_at"),
   platformId: varchar("platform_id", { length: 36 }),
   waitingOnRole: text("waiting_on_role"),
+  // Set only by POST /api/requests/:id/fast-track-approve (see shared/approval.ts)
+  fastTrackApproval: jsonb("fast_track_approval").$type<FastTrackApprovalRecord | null>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -309,6 +312,8 @@ export const skillScans = pgTable("skill_scans", {
   findings: jsonb("findings"),                // ParsedFinding[]
   rawOutput: jsonb("raw_output"),             // full SkillSpector JSON (for export)
   error: text("error"),
+  steps: jsonb("steps"),
+  currentStep: text("current_step"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
 });
@@ -316,7 +321,7 @@ export const skillScans = pgTable("skill_scans", {
 export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({ id: true, createdAt: true });
 
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
-export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true });
+export const insertRequestSchema = createInsertSchema(requests).omit({ id: true, trackingId: true, createdAt: true, updatedAt: true, platformId: true, status: true, locked: true, fastTrackApproval: true });
 export const adminEditRequestSchema = insertRequestSchema
   .partial()
   .extend({

@@ -29,6 +29,11 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 3. Strategic (LeaAnna) review is advisory
 4. Both Chairs (Jeff + Kirun) must approve after Security + Tech pass
 5. "Needs More Info" pauses workflow, returns to requester
+6. **Fast-Track Approval** (admin only): button at the bottom of the Review Status card on `/requests/:id`. The admin ticks who signed off on each stage (Security, Tech/Financial, Chair, Strategic, or anyone else via "Add someone else"), adds approval comments and conditions, then approves in one step. Any stage left open is overridden.
+   - Each new sign-off is stored as a normal `pass` review decision ("Sign-off recorded via Fast-Track Approval by …"); people who already passed keep their original decision. Open fail / needs-more-info decisions on a stage being signed off are superseded; nothing is deleted.
+   - The request is set to `approved` and locked, its platform is set to `approved` in the inventory (created if missing) with a decision summary, and both get a `fast_track_approved` audit log entry.
+   - The full record (approver, time, previous status, comments, conditions, sign-offs) is kept on `requests.fast_track_approval` (JSONB). It can only be written by `POST /api/requests/:id/fast-track-approve`.
+7. **Approval Report**: every approved request (fast-tracked or not) has a printable certificate at `/requests/:id/approval-report` with the tool name, ARC ID, an approval stamp, stage-by-stage sign-offs, comments and conditions. "Print / Save PDF" produces a one-page letter PDF for typical requests. Linked from the Review Status card and from the platform's detail page.
 
 ## Key Files
 - `shared/schema.ts` - All Drizzle schemas, Zod types, enums
@@ -40,13 +45,18 @@ Internal AI governance application for managing AI tool requests, approvals, pla
 - `client/src/components/app-sidebar.tsx` - Navigation sidebar
 - `client/src/components/status-badge.tsx` - Status/role/risk badges
 - `client/src/components/review-panel.tsx` - Review submission form
+- `shared/approval.ts` - Fast-Track Approval input schema, stored record type, and approval report payload type
+- `server/fast-track.ts` - Pure logic for planning a fast-track approval and assembling the approval report (tested in `server/__tests__/fast-track.test.ts`)
+- `client/src/components/fast-track-approval-dialog.tsx` - Fast-Track Approval dialog
+- `client/src/pages/approval-report.tsx` - Printable approval certificate (rendered outside the app shell)
 - `server/skill-inspector/*` - SkillSpector integration (inspector pipeline, input validation, output parser, venv CLI path)
 
 ## Pages
 - `/` - Dashboard with stats and recent requests
 - `/requests/new` - 4-step intake form wizard
 - `/requests` - My Requests list
-- `/requests/:id` - Request detail with review status
+- `/requests/:id` - Request detail with review status (and Fast-Track Approval for admins)
+- `/requests/:id/approval-report` - Printable approval certificate for an approved request
 - `/reviews` - Reviewer inbox
 - `/platforms` - Platform inventory list
 - `/platforms/:id` - Platform detail with findings
@@ -85,8 +95,11 @@ A single module-wide cron (`server/integrations/usage-scheduler.ts`, default `0 
 ### Skill Inspector
 Wraps NVIDIA SkillSpector (Python 3.12), installed into a `.venv` baked into the Replit build (see `replit.nix` + `script/build.ts`). The scanner is invoked as a child process and streams live progress to the client over SSE. Scan results are persisted to the `skill_scans` table and surfaced in "My scans".
 
+**Live scan progress:** progress is streamed from SkillSpector's LangGraph workflow via `server/skill-inspector/skillspector_stream.py` (run by the venv's Python), which emits one NDJSON event per finished graph node. The inspector drives a pure step state machine (`server/skill-inspector/step-machine.ts`) over the fixed 25-node catalog (`shared/skill-inspector-types.ts`) to derive pending/running/done/failed, persists per-step state on `skill_scans.steps` (jsonb) + `skill_scans.current_step`, and forwards it over the existing SSE as `step` events. The client renders a phase-grouped checklist live (`client/src/components/skill-inspector/scan-progress.tsx`); if the SSE stream drops mid-scan it falls back to polling the scan row, and "My scans" auto-polls while any scan is running.
+
 - `OPENAI_API_KEY` — reused from the main AI config; passed to SkillSpector for its LLM analysis stage
 - `SKILLSPECTOR_PROVIDER` — set to `openai` by the server when spawning the scanner (not required in `.env`)
-- `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`)
+- `SKILLSPECTOR_MODEL` — optional model override forwarded to SkillSpector (e.g. `gpt-4o-mini`). Strongly recommended: the AI analyzer stage makes per-node LLM calls, so a fast model keeps scans well under the timeout
+- `SKILLSPECTOR_TIMEOUT_MS` — optional scan timeout in milliseconds (default 10 min); raise for very large repos or slow models
 
 If the `.venv` is absent the feature degrades gracefully: `GET /api/skill-inspector/status` returns `scannerAvailable: false` and scan requests return a friendly 503 without crashing the app.

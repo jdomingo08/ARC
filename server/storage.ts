@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { pool } from "./db";
-import { eq, desc, and, ilike, sql, gte, lte, asc } from "drizzle-orm";
+import { eq, desc, and, ilike, sql, gte, lte, asc, inArray } from "drizzle-orm";
 import {
   users, requests, reviewDecisions, platforms,
   platformAttributeDefinitions, tiers, riskFindings,
@@ -49,6 +49,7 @@ export interface IStorage {
   createReviewDecision(decision: InsertReviewDecision): Promise<ReviewDecision>;
   getReviewDecisionsByRequest(requestId: string): Promise<ReviewDecision[]>;
   supersedePriorDecisions(requestId: string, reviewerRole: string): Promise<void>;
+  supersedeReviewDecisions(requestId: string, ids: string[]): Promise<void>;
 
   createPlatform(platform: InsertPlatform): Promise<Platform>;
   getPlatform(id: string): Promise<Platform | undefined>;
@@ -221,6 +222,13 @@ export class DatabaseStorage implements IStorage {
     await db.update(reviewDecisions)
       .set({ superseded: true })
       .where(and(eq(reviewDecisions.requestId, requestId), eq(reviewDecisions.reviewerRole, reviewerRole)));
+  }
+
+  async supersedeReviewDecisions(requestId: string, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await db.update(reviewDecisions)
+      .set({ superseded: true })
+      .where(and(eq(reviewDecisions.requestId, requestId), inArray(reviewDecisions.id, ids)));
   }
 
   async createPlatform(platform: InsertPlatform): Promise<Platform> {
@@ -550,6 +558,13 @@ export class DatabaseStorage implements IStorage {
     // Runtime migration: add logo_url column if missing
     await pool.query(`
       ALTER TABLE platforms ADD COLUMN IF NOT EXISTS logo_url TEXT;
+    `).catch(() => { /* column may already exist */ });
+
+    // Runtime migration: Fast-Track Approval record (see shared/approval.ts).
+    // Lives here, not in runStartupMigrations, because seedData runs first and
+    // its request inserts reference every column in the schema.
+    await pool.query(`
+      ALTER TABLE requests ADD COLUMN IF NOT EXISTS fast_track_approval JSONB;
     `).catch(() => { /* column may already exist */ });
 
     // Ensure workflow_steps table exists before seeding
@@ -1059,6 +1074,12 @@ export class DatabaseStorage implements IStorage {
           completed_at TIMESTAMP
         );`,
       )
+      .catch(() => {});
+    await pool
+      .query(`ALTER TABLE skill_scans ADD COLUMN IF NOT EXISTS steps JSONB;`)
+      .catch(() => {});
+    await pool
+      .query(`ALTER TABLE skill_scans ADD COLUMN IF NOT EXISTS current_step TEXT;`)
       .catch(() => {});
   }
 }
